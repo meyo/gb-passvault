@@ -75,7 +75,7 @@ function mapChar(x, y) {
 function rowText(y) { let s = ''; for (let x = 0; x < 20; x++) s += mapChar(x, y); return s; }
 function tilemapText() { const r = []; for (let y = 0; y < 18; y++) r.push(rowText(y)); return r; }
 function screenText() { return tilemapText().join('\n'); }
-function rowWindow(y) { return rowText(y).slice(5, 20); }   /* "001 " 之后的 15 字符 */
+function rowWindow(y) { return rowText(y).slice(5, 19); }   /* "001 " 之后的 14 字符 */
 
 function waitUntil(fn, maxF) {
     maxF = maxF || 400;
@@ -104,6 +104,14 @@ function dump(name, holdKeys) {
     settle(12, holdKeys);
     const rows = tilemapText();
     fs.writeFileSync(path.join(OUT, name + '.txt'), rows.join('\n') + '\n');
+    /* 同时留一份 PPM，便于用 ffmpeg 转 PNG 做视觉验收（.gitignore 默认忽略） */
+    const scr = gb.getScreen();
+    const ppm = Buffer.alloc(160 * 144 * 3);
+    for (let i = 0, p = 0; i < scr.length; i += 4, p += 3) {
+        ppm[p] = scr[i]; ppm[p + 1] = scr[i + 1]; ppm[p + 2] = scr[i + 2];
+    }
+    fs.writeFileSync(path.join(OUT, name + '.ppm'),
+        Buffer.concat([Buffer.from('P6\n160 144\n255\n', 'ascii'), ppm]));
     console.log('--- ' + name + ' ---');
     console.log(rows.join('\n').replace(/\s+$/gm, ''));
     return rows;
@@ -432,12 +440,55 @@ function buildSyntheticSave(count) {
 /* ================================================================== */
 
 try {
+    console.log('== 流程 0: 损坏/未知存档保护 (绝不静默清空) ==');
+    {
+        const good = buildSyntheticSave(2);
+        const bad = Buffer.from(good);
+        bad[11] ^= 0xFF;                         /* 破坏 PMG4 全局校验和 */
+        boot(bad);
+        if (!waitUntil(() => screenText().includes('PRESS START'), 400)) throw new Error('损坏档: 标题未出现');
+        tap('START');
+        if (!waitUntil(() => screenText().includes('SAVE CORRUPT'), 400)) throw new Error('损坏档: 未显示 SAVE CORRUPT');
+        if (!waitUntil(() => rowText(6).includes('SCAN FINDS'), 300)) throw new Error('损坏档: 扫描行未绘制完成');
+        frames(3);
+        ok(!screenText().includes('FIRST TIME SETUP'), '损坏档未进入首次设置 (未静默清空)');
+        ok(screenText().includes('DATA IS UNTOUCHED'), '损坏档明确提示数据未改动');
+        ok(rowText(6).includes('002/255'), '只读扫描发现 2 条可识别记录');
+        dump('00-corrupt');
+        const before = Buffer.from(sram());
+        frames(120);
+        ok(Buffer.compare(before, Buffer.from(sram())) === 0, '停留 120 帧未写 SRAM');
+        if (!tapUntil('A', () => screenText().includes('SAVE CORRUPT'), 200, 4)) throw new Error('损坏档: RETRY 未重新检测');
+        ok(Buffer.compare(before, Buffer.from(sram())) === 0, 'RETRY 未写 SRAM');
+        if (!tapUntil('START', () => screenText().includes('ERASE ALL DATA?'), 200, 4)) throw new Error('损坏档: 未进入擦除确认');
+        ok(Buffer.compare(before, Buffer.from(sram())) === 0, '擦除确认前未写 SRAM');
+        if (!tapUntil('A', () => pinScreenReady('NEW PIN', 6), 600, 6)) throw new Error('损坏档: 确认擦除后未进入设置');
+        const wiped = sram();
+        ok(String.fromCharCode(wiped[0], wiped[1], wiped[2], wiped[3]) === 'PMG4', '显式擦除后重建 PMG4 头');
+        ok(recOf(wiped, 0).used === 0 && recOf(wiped, 1).used === 0, '显式擦除后槽位清零');
+        ok(checksumOk(wiped), '显式擦除后校验和有效');
+    }
+    {
+        const unknown = Buffer.alloc(32768);
+        unknown.write('XXXX', 0, 'latin1');
+        boot(unknown);
+        if (!waitUntil(() => screenText().includes('PRESS START'), 400)) throw new Error('未知档: 标题未出现');
+        tap('START');
+        if (!waitUntil(() => screenText().includes('UNSUPPORTED SAVE'), 400)) throw new Error('未知档: 未显示 UNSUPPORTED SAVE');
+        if (!waitUntil(() => screenText().includes('UNKNOWN/OLD FORMAT'), 300)) throw new Error('未知档: 格式提示未绘制完成');
+        ok(screenText().includes('UNKNOWN/OLD FORMAT'), '未知档提示旧档/未知格式');
+        dump('00-unsupported');
+        const before = Buffer.from(sram());
+        frames(120);
+        ok(Buffer.compare(before, Buffer.from(sram())) === 0, '未知档停留 120 帧未写 SRAM');
+    }
+
     console.log('== 流程 A: 全新卡带 (无存档) + 20 字符标签/用户名 + 跑马灯 + 编辑 ==');
     boot();
     waitOk(() => screenText().includes('PRESS START'), '标题画面出现 PRESS START');
     dump('01-title');
     ok(screenText().includes('GB PASSWORD'), '标题文字 GB PASSWORD');
-    ok(screenText().includes('V0.3.5'), '标题版本 V0.3.5');
+    ok(screenText().includes('V0.3.6'), '标题版本 V0.3.6');
 
     if (!tapUntil('START', () => pinScreenReady('NEW PIN', 6), 300, 8)) throw new Error('无法进入设置 PIN 画面');
     ok(true, '进入设置 6 位 PIN 画面');
@@ -540,6 +591,7 @@ try {
         rerolled = waitUntil(() => rowText(2) !== genW1, 120);
     }
     ok(rerolled, '再按 SELECT 重掷 (内容变化)');
+    frames(5);
     const shownTail = rowText(2).slice(1, 15);
 
     frames(5);
@@ -558,7 +610,7 @@ try {
     ok(pass2.slice(2, 16) === shownTail, '保存的密码与画面显示尾部一致');
     ok(checksumOk(s), '生成密码写入后 SRAM 校验和正确');
 
-    /* 列表: 位置 + 15 字符窗口 + 选中行跑马灯 */
+    /* 列表: 位置 + 14 字符窗口 + 选中行跑马灯 */
     menuGoto(0);
     if (!tapUntil('A', () => listReady(), 200, 6)) throw new Error('未进入账号列表');
     ok(true, '进入账号列表');
@@ -571,8 +623,8 @@ try {
     /* 选中 20 字符标签: 先滚到尾部再滚回头部 */
     if (!tapUntil('DOWN', () => listSel() === 1, 120, 4)) throw new Error('无法选中第 2 条');
     ok(true, '选中 20 字符标签的条目 (跑马灯)');
-    ok(waitUntil(() => rowWindow(4) === 'FGHIJKLMNOPQRST', 900), '跑马灯滚动显示标签尾部');
-    ok(waitUntil(() => rowWindow(4) === 'ABCDEFGHIJKLMNO', 900), '跑马灯回滚显示标签头部');
+    ok(waitUntil(() => rowWindow(4) === 'GHIJKLMNOPQRST', 900), '跑马灯滚动显示标签尾部');
+    ok(waitUntil(() => rowWindow(4) === 'ABCDEFGHIJKLMN', 900), '跑马灯回滚显示标签头部');
     dump('06b-list-marquee');
 
     listGoto(0);
@@ -779,6 +831,7 @@ try {
     typeText('LABEL (MAX 20)', 'LAST', () => kbScreenReady('USERNAME (MAX 20)'));
     if (!tapUntil('START', () => kbScreenReady('PASSWORD (MAX 36)'), 200, 6)) throw new Error('流程 D: 空用户名未进入密码页');
     if (!tapUntil('SELECT', () => rowText(2).slice(2, 16).trim() !== '', 200, 6)) throw new Error('流程 D: 255 号槽密码生成失败');
+    frames(5);
     const tail254 = rowText(2).slice(1, 15);
     frames(5);
     tap('START');
@@ -958,7 +1011,7 @@ try {
     /* --- 按住 DOWN 连续滚动 --- */
     let mPos = rowText(0).match(/(\d{3})\/255/);
     const startPos = mPos ? parseInt(mPos[1], 10) : 0;
-    hold('DOWN', 150);
+    hold('DOWN', 220);
     frames(10);
     mPos = rowText(0).match(/(\d{3})\/255/);
     const endPos = mPos ? parseInt(mPos[1], 10) : 0;
@@ -983,15 +1036,61 @@ try {
     enterPin('123456');
     waitOk(() => screenText().includes('VAULT MENU'), '流程 F: 自动锁屏后可重新解锁');
 
-    /* --- 修改 PIN 中输入闲置同样自动锁屏 (新 PIN 不保存) --- */
+    /* --- 快速锁定: B+SELECT (非输入画面) --- */
+    frames(3);
+    let quickLocked = false;
+    for (let t = 0; t < 5 && !quickLocked; t++) {
+        chord(['B', 'SELECT']);
+        quickLocked = waitUntil(() => pinScreenReady('ENTER PIN', 6), 120);
+    }
+    ok(quickLocked, 'B+SELECT 快速锁定回 PIN 画面');
+    if (!quickLocked) throw new Error('快速锁定未触发');
+    enterPin('123456');
+    waitOk(() => screenText().includes('VAULT MENU'), '流程 F: 快速锁定后可重新解锁');
+
+    /* --- 修改 PIN: 先验证旧 PIN; 输入新 PIN 中闲置同样自动锁屏 --- */
     menuGoto(2);
-    if (!tapUntil('A', () => pinScreenReady('NEW PIN', 6), 300, 6)) throw new Error('流程 F: 未进入改 PIN 画面');
+    if (!tapUntil('A', () => pinScreenReady('OLD PIN', 6), 300, 6)) throw new Error('流程 F: 未进入旧 PIN 验证画面');
+    enterPin('123456');
+    if (!waitUntil(() => pinScreenReady('NEW PIN', 6), 500)) throw new Error('流程 F: 旧 PIN 正确后未进入新 PIN');
+    ok(true, '修改 PIN 先验证旧 PIN 成功');
     if (!waitUntil(() => pinScreenReady('ENTER PIN', 6), 9000)) throw new Error('流程 F: 改 PIN 中闲置未自动锁屏');
-    ok(true, '修改 PIN 画面闲置 1 分钟自动锁屏');
+    ok(true, '修改新 PIN 画面闲置 1 分钟自动锁屏');
     s = sram();
     ok(s[4] === 8 && s[5] === 9 && s[9] === 3, '改 PIN 闲置锁屏后旧 PIN 未被修改 (混淆值不变)');
     enterPin('123456');
     waitOk(() => screenText().includes('VAULT MENU'), '流程 F: 改 PIN 闲置锁屏后可重新解锁');
+
+    /* --- 错误旧 PIN 不修改, 正确旧 PIN 才能换新 PIN --- */
+    menuGoto(2);
+    if (!tapUntil('A', () => pinScreenReady('OLD PIN', 6), 300, 6)) throw new Error('流程 F: 未进入旧 PIN (错误路径)');
+    enterPin('654321');
+    waitOk(() => screenText().includes('VAULT MENU'), '错误旧 PIN 被拒绝并返回菜单', 1200);
+    s = sram();
+    ok(s[4] === 8 && s[5] === 9 && s[9] === 3, '错误旧 PIN 未修改 PIN');
+
+    menuGoto(2);
+    if (!tapUntil('A', () => pinScreenReady('OLD PIN', 6), 300, 6)) throw new Error('流程 F: 未进入旧 PIN (成功路径)');
+    enterPin('123456');
+    if (!waitUntil(() => pinScreenReady('NEW PIN', 6), 500)) throw new Error('流程 F: 成功路径未进入新 PIN');
+    enterPin('111111');
+    if (!waitUntil(() => pinScreenReady('CONFIRM PIN', 6), 500)) throw new Error('流程 F: 未进入确认 PIN');
+    enterPin('111111');
+    waitOk(() => screenText().includes('VAULT MENU'), '正确旧 PIN 修改为新 PIN', 1500);
+    s = sram();
+    ok(s[4] === 8 && s[5] === 8 && s[9] === 8, '新 PIN 混淆值已保存');
+
+    /* 改回 123456, 后面的断电/迁移用例继续使用原 PIN */
+    menuGoto(2);
+    if (!tapUntil('A', () => pinScreenReady('OLD PIN', 6), 300, 6)) throw new Error('流程 F: 未进入旧 PIN (改回)');
+    enterPin('111111');
+    if (!waitUntil(() => pinScreenReady('NEW PIN', 6), 500)) throw new Error('流程 F: 改回时未进入新 PIN');
+    enterPin('123456');
+    if (!waitUntil(() => pinScreenReady('CONFIRM PIN', 6), 500)) throw new Error('流程 F: 改回时未进入确认 PIN');
+    enterPin('123456');
+    waitOk(() => screenText().includes('VAULT MENU'), 'PIN 改回 123456', 1500);
+    s = sram();
+    ok(s[4] === 8 && s[5] === 9 && s[9] === 3, 'PIN 已恢复为 123456');
 
     /* --- 回收站: 删除 -> 断电 -> 恢复 --- */
     menuGoto(0);
@@ -1056,6 +1155,53 @@ try {
         menuGoto(0);
         if (!tapUntil('A', () => listReady(), 200, 6)) throw new Error('流程 F: v0.3.1 旧档未进入列表');
         ok(rowText(16).includes('SEL=USER'), 'v0.3.1 旧档列表默认标签视图');
+    }
+
+    console.log('== 流程 G: 回收站单条永久删除 + START 清空 ==');
+    {
+        boot(buildSyntheticSave(3));
+        if (!tapUntil('START', () => pinScreenReady('ENTER PIN', 6), 300, 8)) throw new Error('流程 G: 未进入解锁');
+        enterPin('123456');
+        waitOk(() => screenText().includes('VAULT MENU'), '流程 G: 解锁进入菜单');
+        menuGoto(0);
+        if (!tapUntil('A', () => listReady(), 200, 6)) throw new Error('流程 G: 未进入列表');
+
+        listGoto(0);
+        if (!tapUntil('A', () => screenText().includes(detailTitle(0)), 200, 6)) throw new Error('流程 G: 未打开 SLOT01');
+        if (!tapUntil('START', () => screenText().includes('DELETE THIS SLOT?'), 200, 6)) throw new Error('流程 G: SLOT01 未出现删除确认');
+        if (!tapUntil('A', () => listReady(), 600, 6)) throw new Error('流程 G: SLOT01 删除后未返回列表');
+
+        listGoto(1);
+        if (!tapUntil('A', () => screenText().includes(detailTitle(1)), 200, 6)) throw new Error('流程 G: 未打开 SLOT02');
+        if (!tapUntil('START', () => screenText().includes('DELETE THIS SLOT?'), 200, 6)) throw new Error('流程 G: SLOT02 未出现删除确认');
+        if (!tapUntil('A', () => listReady(), 600, 6)) throw new Error('流程 G: SLOT02 删除后未返回列表');
+        s = sram();
+        ok(recOf(s, 0).used === 0 && recOf(s, 1).used === 0, '流程 G: 两条记录已进入回收站');
+        ok(s[20420] === 2, '流程 G: 回收站 head = 2');
+
+        if (!tapUntil('B', () => screenText().includes('VAULT MENU'), 200, 6)) throw new Error('流程 G: 列表返回菜单失败');
+        menuGoto(4);
+        if (!tapUntil('A', () => rowText(0).includes('RECYCLE BIN'), 200, 6)) throw new Error('流程 G: 未进入回收站');
+        frames(5);
+        ok(rowText(1).includes('SLOT02') && rowText(2).includes('SLOT01'), '流程 G: 回收站按最近删除排序');
+
+        if (!tapUntil('SELECT', () => screenText().includes('DELETE THIS ITEM?'), 200, 6)) throw new Error('流程 G: SELECT 未进入永久删除确认');
+        if (!tapUntil('A', () => rowText(1).includes('SLOT01') && !rowText(1).includes('SLOT02'), 500, 6)) throw new Error('流程 G: 永久删除 SLOT02 失败');
+        s = sram();
+        ok(s[20420] === 2, '流程 G: 单条删除不改变 head');
+        ok(s[20432 + REC_SZ] === 0, '流程 G: SLOT02 回收站记录已清零');
+        ok(binChecksumOk(s), '流程 G: 单条删除后回收站校验和正确');
+
+        if (!tapUntil('START', () => screenText().includes('EMPTY RECYCLE BIN?'), 200, 6)) throw new Error('流程 G: START 未进入清空确认');
+        if (!tapUntil('A', () => screenText().includes('BIN EMPTY'), 600, 6)) throw new Error('流程 G: 清空回收站失败');
+        s = sram();
+        ok(s[20420] === 0, '流程 G: 清空后 head = 0');
+        for (let i = 0; i < 16 * REC_SZ; i++) {
+            if (s[20432 + i] !== 0) { ok(false, '流程 G: 清空后所有回收站记录为 0'); break; }
+            if (i === 16 * REC_SZ - 1) ok(true, '流程 G: 清空后所有回收站记录为 0');
+        }
+        ok(binChecksumOk(s), '流程 G: 清空后回收站校验和正确');
+        ok(checksumOk(s), '流程 G: 回收站操作不影响主库校验和');
     }
 } catch (e) {
     fails++;

@@ -1,5 +1,5 @@
 /*
- * GB Password Vault v0.3.1
+ * GB Password Vault v0.3.6
  * ------------------------------------------------------------------
  * 在真实 Game Boy (DMG / GBC 兼容模式 / GBA) 上运行的离线密码管理器。
  * 编译工具链: GBDK-2020 4.5.0  (C/SDCC)
@@ -13,7 +13,7 @@
  *   - 添加流程: 屏幕虚拟键盘 (大写/小写/符号页三种模式, D-pad 选字 A 输入);
  *              用户名可留空; 密码页按 SELECT 生成 16 位随机强密码
  *   - 列表页:   12 行滚动窗口 + 右上角位置 (nnn/255), 上下步进 / 左右跳 8 条;
- *              选中行标签超过 15 字符时来回跑马灯显示
+ *              选中行标签超过 14 字符时来回跑马灯显示
  *   - 详情页:   按住 A 显示密码明文 (分两行), SELECT+START 编辑, START 删除
  *   - 存档升级: 识别 v0.3 的 PMG3 存档, 验证旧 4 位 PIN 后迁移到新布局
  *   - 全部数据即时写入 SRAM (带全局校验和), 关机不丢
@@ -69,6 +69,13 @@
 #define OFS_SLOTS  16
 
 #define SET_VALID  0x80
+
+/* vault_load() 返回值: 损坏/不支持的存档必须停在恢复画面, 不能静默清空 */
+#define LOAD_EMPTY        0
+#define LOAD_OK           1
+#define LOAD_LEGACY       2
+#define LOAD_CORRUPT      3
+#define LOAD_UNSUPPORTED  4
 
 #define SR ((volatile uint8_t *)0xA000)
 
@@ -151,6 +158,18 @@ static const uint8_t FRAME_TILES[9 * 16] = {
 
 static const uint8_t TITLE_SEQ[12] = {
     239, 240, 241, 242, 240, 243, 238, 244, 245, 246, 247, 243
+};
+
+/* 248..255: 8 个 8x8 单色小图标 (菜单/警告用) */
+static const uint8_t ICON_BITS[8][8] = {
+    { 0x7E, 0x42, 0x7E, 0x42, 0x7E, 0x42, 0x7E, 0x00 }, /* list  */
+    { 0x18, 0x18, 0x7E, 0x7E, 0x18, 0x18, 0x00, 0x00 }, /* plus  */
+    { 0x3C, 0x66, 0x66, 0x3C, 0x18, 0x18, 0x30, 0x00 }, /* key   */
+    { 0x18, 0x24, 0x42, 0x7E, 0x66, 0x66, 0x7E, 0x00 }, /* lock  */
+    { 0x24, 0x7E, 0x42, 0x42, 0x42, 0x42, 0x7E, 0x00 }, /* trash */
+    { 0x24, 0x2C, 0x3C, 0x7E, 0x7E, 0x3C, 0x2C, 0x24 }, /* gear  */
+    { 0x7E, 0x42, 0x42, 0x24, 0x24, 0x18, 0x18, 0x00 }, /* shield*/
+    { 0x18, 0x3C, 0x7E, 0x7E, 0x18, 0x18, 0x18, 0x00 }  /* warn  */
 };
 
 /* 生成用源字模 (font_tiles 编号): 0-9, '_' */
@@ -294,10 +313,11 @@ static void settings_save(void)
 }
 
 /* 读入头部.
- * 返回 0 = 空/损坏 (交由上层重新设置), 1 = 当前格式, 2 = v0.3 旧档待迁移 */
+ * 返回 LOAD_EMPTY / LOAD_OK / LOAD_LEGACY / LOAD_CORRUPT / LOAD_UNSUPPORTED.
+ * 只有真正空白的 SRAM 才算 LOAD_EMPTY; 有 MAGIC 但校验失败绝不能当空档. */
 static uint8_t vault_load(void)
 {
-    uint8_t i, ok = 0, g;
+    uint8_t i, g, unknown = 0;
 
     sram_on();
     if (magic_is(MAGIC)) {
@@ -317,26 +337,38 @@ static uint8_t vault_load(void)
             }
             vault_chk = rb(OFS_CHK);
             chk_valid = 1;
-            ok = 1;
+            sram_off();
+            return LOAD_OK;
         }
-    } else if (magic_is(MAGIC3)) {
+        sram_off();
+        return LOAD_CORRUPT;
+    }
+
+    if (magic_is(MAGIC3)) {
         if (rb(9) == legacy_chk_calc()) {
             for (i = 0; i < 4; i++) legacy_pin_obf[i] = rb(OFS_PIN + i);
             legacy_tries = rb(8);
             if (legacy_tries > 3) legacy_tries = 3;
-            ok = 2;
+            sram_off();
+            return LOAD_LEGACY;
         }
+        sram_off();
+        return LOAD_CORRUPT;
+    }
+
+    /* 空白卡带: 前 4 字节全为 0x00/0xFF. 其他未知数据不能静默重建. */
+    for (i = 0; i < 4; i++) {
+        uint8_t b = rb(OFS_MAGIC + i);
+        if (b != 0x00 && b != 0xFF) unknown = 1;
     }
     sram_off();
 
-    if (!ok) {
-        pin_set = 0;
-        tries = 0;
-        chk_valid = 0;
-        gen_idx = 1; gen_sym = 1; lock_idx = 2; list_user = 0;
-        for (i = 0; i < PIN_LEN; i++) pin_obf[i] = 0;
-    }
-    return ok;
+    pin_set = 0;
+    tries = 0;
+    chk_valid = 0;
+    gen_idx = 1; gen_sym = 1; lock_idx = 2; list_user = 0;
+    for (i = 0; i < PIN_LEN; i++) pin_obf[i] = 0;
+    return unknown ? LOAD_UNSUPPORTED : LOAD_EMPTY;
 }
 
 /* 槽位区整体清零 (清库/首次设置; 不碰头部; 同时清回收站/迁移暂存) */
@@ -641,6 +673,13 @@ static uint8_t ui_getkey(uint8_t mask)
     }
 }
 
+/* 快速锁库: 非输入画面同时按 B+SELECT.
+ * 输入/PIN 画面不启用, 避免与 B=删除/返回冲突. */
+static uint8_t lock_chord(uint8_t j)
+{
+    return (uint8_t)((j & (J_B | J_SELECT)) == (J_B | J_SELECT));
+}
+
 /* ------------------------------------------------------------------ */
 /* 屏幕绘制工具                                                        */
 /* ------------------------------------------------------------------ */
@@ -683,6 +722,43 @@ static void screen_clear(void)
     uint8_t y;
     memset(row, 0, 20);
     for (y = 0; y < 18; y++) set_bkg_tiles(0, y, 20, 1, row);
+}
+
+static void put_tile(uint8_t x, uint8_t y, uint8_t t)
+{
+    set_bkg_tiles(x, y, 1, 1, &t);
+}
+
+/* 9-slice 立体边框 (192..200), 内部保持空白 */
+static void draw_frame(uint8_t x, uint8_t y, uint8_t w, uint8_t h)
+{
+    uint8_t row[20];
+    uint8_t i;
+
+    if (w < 3 || h < 3 || x + w > 20 || y + h > 18) return;
+
+    row[0] = 192;
+    for (i = 1; i < (uint8_t)(w - 1); i++) row[i] = 193;
+    row[w - 1] = 194;
+    set_bkg_tiles(x, y, w, 1, row);
+
+    for (i = 1; i < (uint8_t)(h - 1); i++) {
+        put_tile(x, (uint8_t)(y + i), 195);
+        put_tile((uint8_t)(x + w - 1), (uint8_t)(y + i), 197);
+    }
+
+    row[0] = 198;
+    for (i = 1; i < (uint8_t)(w - 1); i++) row[i] = 199;
+    row[w - 1] = 200;
+    set_bkg_tiles(x, (uint8_t)(y + h - 1), w, 1, row);
+}
+
+static void draw_hline(uint8_t y)
+{
+    uint8_t i;
+    put_tile(0, y, 192);
+    for (i = 1; i < 19; i++) put_tile(i, y, 193);
+    put_tile(19, y, 194);
 }
 
 static void toast(const char *msg)
@@ -747,6 +823,29 @@ static void rng_mix(uint16_t v)
     rng_state = (uint16_t)(rng_state * 251u + 33u);
 }
 
+/* 启动时混入 DIV/LY 与多次按键时序, 避免固定种子.
+ * 注意: 这不是密码学安全的随机数, 只用于生成用户可修改的默认密码. */
+static void rng_boot(void)
+{
+    uint8_t i;
+    rng_state = (uint16_t)(0xACE1u ^ ((uint16_t)DIV_REG << 8) ^ LY_REG);
+    for (i = 0; i < 8; i++) {
+        rng_mix((uint16_t)(i * 37u + ((uint16_t)DIV_REG << 3) + LY_REG));
+        delay(1);
+    }
+}
+
+/* 无模偏差采样: 拒绝落在 256 尾部不完整区间的字节 */
+static uint8_t rng_below(uint8_t n)
+{
+    uint16_t limit = (uint16_t)(256u - (256u % (uint16_t)n));
+    uint8_t r;
+    do {
+        r = rng_byte();
+    } while ((uint16_t)r >= limit);
+    return (uint8_t)(r % n);
+}
+
 /* 生成强密码: 按设置长度 (12/16/24/32), 可选符号 */
 static uint8_t gen_password(char *buf, uint8_t max)
 {
@@ -754,18 +853,19 @@ static uint8_t gen_password(char *buf, uint8_t max)
     uint8_t i, j, t, base;
 
     if (n > max) n = max;
+    rng_mix((uint16_t)(DIV_REG | ((uint16_t)LY_REG << 8)));
     base = 3;
-    buf[0] = GEN_UP[rng_byte() % 24];
-    buf[1] = GEN_LO[rng_byte() % 25];
-    buf[2] = GEN_DIG[rng_byte() % 8];
+    buf[0] = GEN_UP[rng_below(24)];
+    buf[1] = GEN_LO[rng_below(25)];
+    buf[2] = GEN_DIG[rng_below(8)];
     if (gen_sym) {
-        buf[3] = GEN_SYM[rng_byte() % 13];
+        buf[3] = GEN_SYM[rng_below(13)];
         base = 4;
     }
     for (i = base; i < n; i++)
-        buf[i] = gen_sym ? GEN_ALL[rng_byte() % 70] : GEN_ALL_NS[rng_byte() % 57];
+        buf[i] = gen_sym ? GEN_ALL[rng_below(70)] : GEN_ALL_NS[rng_below(57)];
     for (i = (uint8_t)(n - 1); i > 0; i--) {          /* Fisher-Yates */
-        j = (uint8_t)(rng_byte() % (uint8_t)(i + 1));
+        j = rng_below((uint8_t)(i + 1));
         t = (uint8_t)buf[i];
         buf[i] = buf[j];
         buf[j] = (char)t;
@@ -828,6 +928,15 @@ static void gen_ui_tiles(void)
             vr[d + j] = font_tiles[(uint16_t)b * 16 + j];
         vr[d + 14] = 0xFF;
         vr[d + 15] = 0x00;
+    }
+
+    /* 248..255: 小图标 (前景色 1 = 黑) */
+    for (i = 0; i < 8; i++) {
+        for (j = 0; j < 8; j++) {
+            d = (uint16_t)(248 + i) * 16 + (uint16_t)j * 2;
+            vr[d] = ICON_BITS[i][j];
+            vr[d + 1] = 0;
+        }
     }
 }
 
@@ -1194,8 +1303,8 @@ static void list_ensure_visible(void)
     }
 }
 
-#define LIST_LABEL_W 15
-#define LIST_ROW_W   19
+#define LIST_LABEL_W 14
+#define LIST_ROW_W   18
 #define LIST_PAGE    12
 
 /* 跑马灯节拍: TIMA 4kHz 每次回绕 62.5ms */
@@ -1207,7 +1316,7 @@ static void list_ensure_visible(void)
 #define HOLD_LEAD    6      /* ~0.375s 后开始连发 */
 #define HOLD_STEP    2      /* 每 ~0.125s 走一格 */
 
-/* "001 abcdefghijklmno" (19 字符): 3 位编号 + 空格 + 15 字符显示窗 */
+/* "001 abcdefghijklmn" (18 字符): 3 位编号 + 空格 + 14 字符显示窗 */
 static void slot_row_text(uint16_t idx, char *out, uint8_t off)
 {
     slot_t s;
@@ -1247,6 +1356,8 @@ static void draw_slot_list(const char *title)
     put_str(1, 0, title);
     fmt_pos(pos, (uint16_t)(list_sel + 1));
     put_str(13, 0, pos);
+    put_str(9, 1, "B+SEL=LOCK");
+    draw_frame(0, 2, 20, 14);
 
     for (r = 0; r < LIST_ROWS; r++) {
         idx = (uint16_t)(list_view + r);
@@ -1300,12 +1411,17 @@ static void draw_detail(uint16_t i)
     screen_clear();
     fmt_slot_title(t, (uint16_t)(i + 1));
     put_str(1, 0, t);
-    put_str(1, 2, "LABEL:");
+    draw_hline(1);
+    put_fixed(1, 2, " LABEL:", 7, 1);
+    put_tile(18, 2, 248);
     put_fixed(0, 3, cur.label, LBL_MAX, 0);
-    put_str(1, 4, "USER:");
+    put_fixed(1, 4, " USER:", 6, 1);
+    put_tile(18, 4, 250);
     put_fixed(0, 5, cur.user, USR_MAX, 0);
-    put_str(1, 6, "PASS:");
+    put_fixed(1, 6, " PASS:", 6, 1);
+    put_tile(18, 6, 251);
     draw_pass_line(0);
+    draw_hline(14);
     put_str(1, 15, "A=REVEAL B=BACK");
     put_str(1, 16, "SEL+START=EDIT");
     put_str(1, 17, "START=DELETE");
@@ -1359,6 +1475,7 @@ static uint8_t detail_screen(uint16_t i)
         pressed = (uint8_t)(j & ~prev);
 
         if (idle_poll(j)) return 1;
+        if (lock_chord(j)) { waitpadup(); return 1; }
 
         if ((j & J_A) && !reveal) { reveal = 1; draw_pass_line(1); }
         else if (!(j & J_A) && reveal) { reveal = 0; draw_pass_line(0); }
@@ -1454,6 +1571,7 @@ static uint8_t list_screen(void)
         uint8_t redraw = 0;
 
         if (idle_poll(j)) return 1;
+        if (lock_chord(j)) { waitpadup(); return 1; }
         prev = j;
         if ((hold == 1 && !(j & J_UP)) || (hold == 2 && !(j & J_DOWN)))
             hold = 0;
@@ -1585,7 +1703,8 @@ static uint8_t bin_screen(void)
         if (n && sel >= n) sel = (uint8_t)(n - 1);
 
         screen_clear();
-        put_str(1, 0, "RECYCLE BIN");
+        put_tile(0, 0, 252);
+        put_fixed(1, 0, " RECYCLE BIN ", 18, 1);
         for (r = 0; r < BIN_SLOTS; r++) {
             if (r < n) {
                 rec_read_at((uint16_t)(BIN_DATA + (uint16_t)idx[r] * REC_SZ), &s);
@@ -1594,21 +1713,60 @@ static uint8_t bin_screen(void)
                 row[2] = ' ';
                 for (i = 0; i < LIST_LABEL_W; i++)
                     row[3 + i] = (i < s.llen) ? s.label[i] : ' ';
-                row[18] = 0;
+                row[3 + LIST_LABEL_W] = ' ';
+                row[4 + LIST_LABEL_W] = 0;
                 put_fixed(1, (uint8_t)(1 + r), row, 18, (uint8_t)(r == sel));
             } else {
                 put_fixed(1, (uint8_t)(1 + r), "", 18, 0);
             }
         }
-        if (!n) put_str(3, 5, "BIN EMPTY");
-        put_str(1, 17, "A=RESTORE B=BACK");
+        if (!n) {
+            put_tile(9, 3, 252);
+            put_str(3, 5, "BIN EMPTY");
+            put_str(1, 17, "B=BACK");
+        } else {
+            put_str(1, 16, "A=RESTORE SEL=DEL");
+            put_str(1, 17, "START=EMPTY B=BACK");
+        }
 
-        k = ui_getkey(J_UP | J_DOWN | J_A | J_B);
+        k = ui_getkey(J_UP | J_DOWN | J_A | J_B | J_SELECT | J_START);
         if (!k) return 1;
+        if (lock_chord(k)) return 1;
         if (k & J_B) return 0;
         if (!n) continue;
         if (k & J_UP)   { if (sel) sel--; continue; }
         if (k & J_DOWN) { if (sel + 1 < n) sel++; continue; }
+
+        if (k & J_SELECT) {             /* 彻底删除单条 */
+            screen_clear();
+            put_str(1, 4, "DELETE THIS ITEM?");
+            put_str(1, 5, "THIS CANNOT BE UNDONE");
+            put_str(1, 8, "A=YES  B=NO");
+            k = ui_getkey(J_A | J_B);
+            if (!k) return 1;
+            if (k & J_A) {
+                bin_remove(idx[sel]);
+                if (sel) sel--;
+                toast("DELETED");
+            }
+            continue;
+        }
+
+        if (k & J_START) {              /* 清空整个回收站 */
+            screen_clear();
+            put_str(1, 3, "EMPTY RECYCLE BIN?");
+            put_str(1, 5, "THIS CANNOT BE UNDONE");
+            put_str(1, 8, "A=YES  B=NO");
+            k = ui_getkey(J_A | J_B);
+            if (!k) return 1;
+            if (k & J_A) {
+                bin_reset();
+                sel = 0;
+                toast("BIN EMPTY");
+            }
+            continue;
+        }
+
         if (k & J_A) {
             int16_t t;
             rec_read_at((uint16_t)(BIN_DATA + (uint16_t)idx[sel] * REC_SZ), &s);
@@ -1666,6 +1824,72 @@ static void locked_screen(void)
             wraps = 0;
         }
         prev_tima = t;
+    }
+}
+
+/* 只读扫描: 统计 used 标记且长度字段合理的记录, 不写 SRAM */
+static uint16_t scan_used_records(void)
+{
+    uint16_t i, n = 0;
+    uint8_t llen, plen;
+
+    sram_on();
+    for (i = 0; i < N_SLOTS; i++) {
+        uint16_t a = REC_ADDR(i);
+        if (rb(a) != USED_MAGIC) continue;
+        llen = rb((uint16_t)(a + REC_OFS_LLEN));
+        plen = rb((uint16_t)(a + REC_OFS_PLEN));
+        if (llen <= LBL_MAX && plen <= PSS_MAX) n++;
+    }
+    sram_off();
+    return n;
+}
+
+/* 损坏/未知存档恢复画面. 返回 1 = 重试读取, 0 = 已明确擦除 */
+static uint8_t recovery_screen(uint8_t kind)
+{
+    char count[8];
+    uint16_t valid = 0;
+    uint8_t k;
+
+    if (kind == LOAD_CORRUPT) valid = scan_used_records();
+
+    while (1) {
+        screen_clear();
+        draw_frame(0, 0, 20, 17);
+        put_tile(1, 1, 255);
+        put_str(1, 2, (kind == LOAD_UNSUPPORTED)
+                        ? "UNSUPPORTED SAVE" : "SAVE CORRUPT");
+        put_str(1, 4, "DATA IS UNTOUCHED");
+        if (kind == LOAD_CORRUPT) {
+            fmt3_zp(count, valid);
+            count[3] = '/'; count[4] = '2'; count[5] = '5'; count[6] = '5'; count[7] = 0;
+            put_str(1, 6, "SCAN FINDS");
+            put_str(12, 6, count);
+        } else {
+            put_str(1, 6, "UNKNOWN/OLD FORMAT");
+        }
+        put_str(1, 10, "A=RETRY");
+        put_str(1, 11, "START=WIPE");
+        put_str(1, 14, "WIPE ERASES ALL");
+        put_str(1, 15, "ONLY IF YOU ACCEPT");
+
+        k = ui_getkey(J_A | J_START);
+        if (k & J_A) return 1;
+
+        if (k & J_START) {
+            screen_clear();
+            draw_frame(0, 0, 20, 17);
+            put_str(2, 3, "ERASE ALL DATA?");
+            put_str(2, 5, "CANNOT BE UNDONE");
+            put_str(2, 8, "A=YES  B=NO");
+            k = ui_getkey(J_A | J_B);
+            if (k & J_A) {
+                vault_wipe();
+                toast("VAULT WIPED");
+                return 0;
+            }
+        }
     }
 }
 
@@ -1740,7 +1964,18 @@ static void setup_pin(void)
 /* 返回 1 = 输入过程中自动锁屏 (新 PIN 未保存) */
 static uint8_t change_pin(void)
 {
+    uint8_t old[PIN_LEN];
+
     pin_idle = 1;
+    if (pin_entry("OLD PIN", old, PIN_LEN)) {
+        pin_idle = 0;
+        return 1;
+    }
+    if (!pin_ok(old)) {
+        pin_idle = 0;
+        toast("WRONG PIN");
+        return 0;
+    }
     if (choose_pin()) {
         pin_idle = 0;
         return 1;
@@ -1848,7 +2083,7 @@ static uint8_t migrate_v03(void)
 
     screen_clear();
     put_str(2, 4, "SAVE UPGRADED");
-    put_str(1, 6, "V0.3.5 READY");
+    put_str(1, 6, "V0.3.6 READY");
     delay(1800);
     return 1;
 }
@@ -1861,29 +2096,30 @@ static uint8_t settings_screen(void)
     while (1) {
         screen_clear();
         put_str(1, 1, "SETTINGS");
+        draw_frame(0, 2, 20, 13);
         put_fixed(1, 4, "PASSWORD LENGTH", 15, (uint8_t)(sel == 0));
-        put_fixed(1, 6, "SYMBOLS", 15, (uint8_t)(sel == 1));
-        put_fixed(1, 8, "AUTO-LOCK", 15, (uint8_t)(sel == 2));
+        put_fixed(1, 6, "SYMBOLS", 7, (uint8_t)(sel == 1));
+        put_fixed(1, 8, "AUTO-LOCK", 9, (uint8_t)(sel == 2));
 
         v[0] = (char)('0' + GEN_LENS[gen_idx] / 10);
         v[1] = (char)('0' + GEN_LENS[gen_idx] % 10);
         v[2] = 0;
         put_str(17, 4, v);
-        put_str(17, 6, gen_sym ? "ON" : "OFF");
+        put_str(16, 6, gen_sym ? "ON" : "OFF");
         if (LOCK_MINS[lock_idx] >= 10) {
-            put_str(14, 8, "10 MIN");
+            put_str(13, 8, "10 MIN");
         } else {
             v[0] = (char)('0' + LOCK_MINS[lock_idx]);
-            v[1] = 0;
-            put_str(15, 8, v);
-            put_str(17, 8, "MIN");
+            v[1] = ' '; v[2] = 'M'; v[3] = 'I'; v[4] = 'N'; v[5] = 0;
+            put_str(14, 8, v);
         }
 
         put_str(1, 16, "A/<> = CHANGE");
         put_str(1, 17, "B=BACK");
 
-        k = ui_getkey(J_UP | J_DOWN | J_LEFT | J_RIGHT | J_A | J_B);
+        k = ui_getkey(J_UP | J_DOWN | J_LEFT | J_RIGHT | J_A | J_B | J_SELECT);
         if (!k) return 1;
+        if (lock_chord(k)) return 1;
         if (k & J_B) return 0;
         if (k & J_UP)   { if (sel) sel--; continue; }
         if (k & J_DOWN) { if (sel < 2) sel++; continue; }
@@ -1915,14 +2151,22 @@ static uint8_t menu_screen(void)
     while (1) {
         screen_clear();
         put_str(5, 1, "VAULT MENU");
+        draw_frame(0, 2, 20, 14);
         for (i = 0; i < 6; i++) {
-            if (i == sel) put_fixed(2, (uint8_t)(3 + i * 2), items[i], 15, 1);
-            else          put_str(2, (uint8_t)(3 + i * 2), items[i]);
+            uint8_t y = (uint8_t)(3 + i * 2);
+            put_tile(1, y, (uint8_t)(248 + i));
+            if (i == sel) {
+                put_fixed(2, y, "", 17, 1);
+                put_fixed(3, y, items[i], 15, 1);
+            } else {
+                put_str(3, y, items[i]);
+            }
         }
-        put_str(1, 16, "A=SELECT");
+        put_str(1, 16, "A=SELECT B+SEL=LOCK");
         put_str(1, 17, "PRESS A TO OPEN");
-        k = ui_getkey(J_UP | J_DOWN | J_A);
+        k = ui_getkey(J_UP | J_DOWN | J_A | J_B | J_SELECT);
         if (!k) return 1;
+        if (lock_chord(k)) return 1;
         if (k & J_UP)   { if (sel) sel--; continue; }
         if (k & J_DOWN) { if (sel < 5) sel++; continue; }
         if (k & J_A) {
@@ -1965,24 +2209,35 @@ void main(void)
     DISPLAY_ON;
 
     sram_hw_init();                          /* MBC1 RAM banking 模式 */
+    rng_boot();
 
     screen_clear();
-    put_str(2, 3, "GB PASSWORD");
-    put_str(6, 5, "VAULT");
-    put_str(7, 8, "V0.3.5");
-    put_str(2, 11, "PRESS START");
-    put_str(1, 14, "BATTERY CART NEEDED");
+    draw_frame(2, 1, 16, 14);
+    put_tile(9, 2, 254);
+    put_str(4, 3, "GB PASSWORD");
+    put_str(7, 5, "VAULT");
+    put_str(7, 8, "V0.3.6");
+    put_str(4, 11, "PRESS START");
+    put_str(1, 16, "BATTERY CART NEEDED");
     getkey(J_START);
 
-    if (vault_load() == 2) {
-        if (migrate_v03()) {
-            idle_start();
-            menu_screen();          /* 刚设置过新 PIN, 直接进菜单 */
-            idle_stop();
-        }
-    }
-
     while (1) {
+        uint8_t load_state = vault_load();
+
+        if (load_state == LOAD_LEGACY) {
+            if (migrate_v03()) {
+                idle_start();
+                menu_screen();          /* 刚设置过新 PIN, 直接进菜单 */
+                idle_stop();
+            }
+            continue;
+        }
+
+        if (load_state == LOAD_CORRUPT || load_state == LOAD_UNSUPPORTED) {
+            recovery_screen(load_state);
+            continue;
+        }
+
         if (!pin_set) {
             setup_pin();
             idle_start();
