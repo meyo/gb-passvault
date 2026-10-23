@@ -1,0 +1,25 @@
+.DS_Store
+*.sav
+*.rgba
+
+# 构建产物
+build/*
+
+# 模拟器运行产物；只保留文档引用的关键截图和最终测试日志
+test_out/*
+!test_out/pin_empty.png
+!test_out/pin_entered.png
+!test_out/pin_move.png
+!test_out/pin_clr.png
+!test_out/oldpin.png
+!test_out/menu.png
+!test_out/list.png
+!test_out/smoke.log
+
+# 本地工具链与依赖
+tools/gbdk/
+tools/emu/node_modules/
+
+# 编辑器/IDE
+.vscode/
+.idea/

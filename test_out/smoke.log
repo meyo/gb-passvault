@@ -1,0 +1,584 @@
+== 流程 A: 全新卡带 (无存档) + 20 字符标签/用户名 + 跑马灯 + 编辑 ==
+  ok   标题画面出现 PRESS START
+--- 01-title ---
+
+  GB PASSWORD
+      VAULT
+       V0.3.5
+  PRESS START
+ BATTERY CART NEEDED
+  ok   标题文字 GB PASSWORD
+  ok   标题版本 V0.3.5
+  ok   进入设置 6 位 PIN 画面
+--- 02-newpin ---
+    SECRET VAULT
+      NEW PIN
+  _
+    1     2     3
+    4     5     6
+    7     8     9
+   CLR    0    OK
+  B=DEL  START=OK
+  ok   PIN 画面顶部标题 SECRET VAULT
+  ok   标题下绘制实心分隔线
+  ok   PIN 显示为 6 个立体分格框
+  ok   当前位显示下划线
+  ok   数字键盘 1/2/3 图形键帽
+  ok   键盘底行 CLR/0/OK
+  ok   默认高亮按键 1 (整体键帽反白)
+  ok   输入 1 后显示在分格框内
+  ok   再次按 1 后分格框显示 11
+  ok   CLR 键清空已输入的 PIN
+  ok   进入确认 PIN 画面
+  ok   设置完成进入主菜单
+--- 03-menu ---
+
+     VAULT MENU
+  VIEW ACCOUNTS
+  ADD ACCOUNT
+  CHANGE PIN
+  LOCK VAULT
+  RECYCLE BIN
+  SETTINGS
+ A=SELECT
+ PRESS A TO OPEN
+  ok   ROM 头声明 32KB SRAM (0x149 = 0x03)
+  ok   SRAM 快照 = 32768 字节 (4 x 8KB 存储体)
+  ok   SRAM MAGIC = PMG4
+  ok   PIN 123456 以 +7 混淆存储 (8 9 0 1 2 3)
+  ok   错误次数 = 0 (偏移 0x0A)
+  ok   已设置 PIN 标志 = 1 (偏移 0x0C)
+  ok   SRAM 全局校验和正确 (16 + 255*80 = 20416 字节)
+  ok   槽位区总长 = 20416 字节 (跨存储体 0/1/2)
+  ok   ADD ACCOUNT 直接进入标签输入 (自动分配空槽)
+  ok   标签 EMAIL 输入完成, 进入用户名输入画面
+  ok   用户名 BOB 输入完成, 进入密码输入画面
+  ok   密码 ABC 输入完成, 保存并回到主菜单
+--- 05-menu-after-save ---
+
+     VAULT MENU
+  VIEW ACCOUNTS
+  ADD ACCOUNT
+  CHANGE PIN
+  LOCK VAULT
+  RECYCLE BIN
+  SETTINGS
+ A=SELECT
+ PRESS A TO OPEN
+  ok   槽位 1 used = 0xA5
+  ok   槽位 1 标签 = EMAIL
+  ok   槽位 1 用户名 = BOB
+  ok   槽位 1 密码 = ABC
+  ok   写入槽位后 SRAM 校验和正确
+  ok   20 字符标签输入完成
+  ok   20 字符小写用户名输入完成 (键盘 v2)
+  ok   36 位混合大小写 + 符号密码输入完成并保存
+--- 05b-menu-after-mixed ---
+
+     VAULT MENU
+  VIEW ACCOUNTS
+  ADD ACCOUNT
+  CHANGE PIN
+  LOCK VAULT
+  RECYCLE BIN
+  SETTINGS
+ A=SELECT
+ PRESS A TO OPEN
+  ok   槽位 2 标签 = 20 字符完整保存
+  ok   槽位 2 用户名 = 20 字符完整保存
+  ok   槽位 2 密码 = 36 位混合大小写 + 符号
+  ok   写入长字段后 SRAM 校验和正确
+  ok   标签 GENACC 输入完成 (第三账号)
+  ok   用户名可留空 (START 直接跳过)
+  ok   密码页初始为空 (仅光标)
+  ok   密码页按 SELECT 生成随机密码
+--- 05c-generated-password ---
+
+ PASSWORD (MAX 36)
+ )u_@Sz78mbvkcK_
+  A B C D E F G H
+  I J K L M N O P
+  Q R S T U V W X
+  Y Z 0 1 2 3 4 5
+  6 7 8 9 . - _ @
+Aa SYM SPACE  DEL OK
+ A=ADD  B=DEL
+ START=OK SEL=GEN
+  ok   再按 SELECT 重掷 (内容变化)
+  ok   生成密码保存后回到主菜单
+  ok   槽位 3 标签 = GENACC
+  ok   槽位 3 用户名为空
+  ok   生成密码长度 = 16
+  ok   生成密码字符全部来自安全字符集 (无 0O1lI)
+  ok   生成密码含大写/小写/数字/符号四类字符
+  ok   保存的密码与画面显示尾部一致
+  ok   生成密码写入后 SRAM 校验和正确
+  ok   进入账号列表
+--- 06-list ---
+ ACCOUNTS    001/255
+ 001 EMAIL
+ 002 ABCDEFGHIJKLMNO
+ 003 GENACC
+ 004 EMPTY -
+ 005 EMPTY -
+ 006 EMPTY -
+ 007 EMPTY -
+ 008 EMPTY -
+ 009 EMPTY -
+ 010 EMPTY -
+ 011 EMPTY -
+ 012 EMPTY -
+ L/R=PAGE SEL=USER
+ A=OPEN B=BACK
+  ok   列表右上角显示 001/255
+  ok   列表第 1 行显示 001 EMAIL
+  ok   列表第 3 行显示 003 GENACC
+  ok   列表第 2 行显示 002
+  ok   选中 20 字符标签的条目 (跑马灯)
+  ok   跑马灯滚动显示标签尾部
+  ok   跑马灯回滚显示标签头部
+--- 06b-list-marquee ---
+ ACCOUNTS    002/255
+ 001 EMAIL
+ 002 ABCDEFGHIJKLMNO
+ 003 GENACC
+ 004 EMPTY -
+ 005 EMPTY -
+ 006 EMPTY -
+ 007 EMPTY -
+ 008 EMPTY -
+ 009 EMPTY -
+ 010 EMPTY -
+ 011 EMPTY -
+ 012 EMPTY -
+ L/R=PAGE SEL=USER
+ A=OPEN B=BACK
+  ok   进入详情页 (SLOT 001/255)
+--- 07-detail-masked ---
+ SLOT 001/255
+ LABEL:
+EMAIL
+ USER:
+BOB
+ PASS:
+***
+ A=REVEAL B=BACK
+ SEL+START=EDIT
+ START=DELETE
+  ok   详情页标签行显示 EMAIL
+  ok   详情页用户名行显示 BOB
+  ok   密码默认打码 (第 7 行)
+--- 08-detail-reveal ---
+ SLOT 001/255
+ LABEL:
+EMAIL
+ USER:
+BOB
+ PASS:
+ABC
+ A=REVEAL B=BACK
+ SEL+START=EDIT
+ START=DELETE
+  ok   按住 A 显示明文 ABC
+  ok   SELECT+START 进入编辑 (标签已预填)
+  ok   标签确认后进入用户名编辑 (已预填)
+  ok   用户名追加为 BOBX, 密码页已预填 ABC
+  ok   编辑保存后详情页显示 BOBX
+--- 08b-detail-edited ---
+ SLOT 001/255
+ LABEL:
+EMAIL
+ USER:
+BOBX
+ PASS:
+***
+ A=REVEAL B=BACK
+ SEL+START=EDIT
+ START=DELETE
+  ok   编辑后标签保持 EMAIL
+  ok   编辑后用户名 = BOBX
+  ok   编辑后密码保持 ABC
+  ok   编辑后 SRAM 校验和正确
+  ok   单独按 START 弹出删除确认 (组合键不影响)
+  ok   取消删除后记录仍在
+  ok   详情页返回列表
+  ok   列表返回主菜单
+  ok   锁库后进入解锁画面
+--- 09-locked-to-unlock ---
+    SECRET VAULT
+     ENTER PIN
+  _
+    1     2     3
+    4     5     6
+    7     8     9
+   CLR    0    OK
+  B=DEL  START=OK
+已保存 SRAM 快照 save1.bin (32768 字节)
+
+== 流程 B: 错误 PIN 三次 -> SYSTEM LOCKED -> 擦除恢复 ==
+  ok   重载存档后进入解锁画面
+--- 10-unlock ---
+    SECRET VAULT
+     ENTER PIN
+  _
+    1     2     3
+    4     5     6
+    7     8     9
+   CLR    0    OK
+  B=DEL  START=OK
+  ok   第 1 次错误后回到解锁画面
+  ok   第 2 次错误后回到解锁画面
+  ok   错误 3 次进入 SYSTEM LOCKED 彩蛋
+--- 11-system-locked ---
+
+  SYSTEM LOCKED
+  VAULT SEALED
+ HOLD A+B+SEL+START
+ 3 SECONDS TO WIPE
+ OR POWER OFF
+ RECOVERY ERASES ALL
+  ok   错误次数持久化 = 3 (偏移 0x0A)
+  ok   长按不足 3 秒不触发擦除
+  ok   长按 3 秒后擦除, 恢复首次设置流程
+  ok   擦除后稳定在设置 PIN 画面
+--- 12-after-recovery ---
+    SECRET VAULT
+      NEW PIN
+  _
+    1     2     3
+    4     5     6
+    7     8     9
+   CLR    0    OK
+  B=DEL  START=OK
+  ok   擦除后 PIN 标志 = 0
+  ok   擦除后错误次数 = 0
+  ok   擦除后槽位 1 为空
+  ok   擦除后槽位 2 为空
+  ok   擦除后槽位 3 为空
+  ok   擦除后 SRAM 校验和正确
+  ok   擦除后 MAGIC 仍在
+
+== 流程 C: 用 save1 重新上电 -> 正确 PIN -> 数据仍在 ==
+  ok   重新上电进入解锁画面
+  ok   正确 PIN 解锁进入主菜单
+--- 13-menu-after-unlock ---
+
+     VAULT MENU
+  VIEW ACCOUNTS
+  ADD ACCOUNT
+  CHANGE PIN
+  LOCK VAULT
+  RECYCLE BIN
+  SETTINGS
+ A=SELECT
+ PRESS A TO OPEN
+  ok   进入账号列表
+--- 14-list-persisted ---
+ ACCOUNTS    001/255
+ 001 EMAIL
+ 002 ABCDEFGHIJKLMNO
+ 003 GENACC
+ 004 EMPTY -
+ 005 EMPTY -
+ 006 EMPTY -
+ 007 EMPTY -
+ 008 EMPTY -
+ 009 EMPTY -
+ 010 EMPTY -
+ 011 EMPTY -
+ 012 EMPTY -
+ L/R=PAGE SEL=USER
+ A=OPEN B=BACK
+  ok   断电重开后账号 EMAIL 仍在
+  ok   断电重开后账号 GENACC 仍在
+--- 15-reveal-persisted ---
+ SLOT 001/255
+ LABEL:
+EMAIL
+ USER:
+BOBX
+ PASS:
+ABC
+ A=REVEAL B=BACK
+ SEL+START=EDIT
+ START=DELETE
+  ok   断电重开后密码 ABC / 用户名 BOBX 仍在
+  ok   36 位密码打码 (行7=20颗 行8=16颗)
+--- 15b-detail-long-reveal ---
+ SLOT 002/255
+ LABEL:
+ABCDEFGHIJKLMNOPQRST
+ USER:
+abcdefghijklmnopqrst
+ PASS:
+aB3!xY9#qW2$eR5%tY8&
+uI1(uO4)Kz6_@b?!
+ A=REVEAL B=BACK
+ SEL+START=EDIT
+ START=DELETE
+  ok   按住 A 显示 36 位明文 (两行)
+
+== 流程 D: 255 槽滚动列表 + 末槽写入/删除 (合成 20 账号存档) ==
+  ok   流程 D: 解锁进入主菜单
+  ok   列表右上角显示 001/255
+  ok   窗口首行 = 001 SLOT01
+  ok   窗口末行 = 012 SLOT12 (12 行窗口)
+  ok   SLOT13 不在初始窗口
+--- 16-list-window-top ---
+ ACCOUNTS    001/255
+ 001 SLOT01
+ 002 SLOT02
+ 003 SLOT03
+ 004 SLOT04
+ 005 SLOT05
+ 006 SLOT06
+ 007 SLOT07
+ 008 SLOT08
+ 009 SLOT09
+ 010 SLOT10
+ 011 SLOT11
+ 012 SLOT12
+ L/R=PAGE SEL=USER
+ A=OPEN B=BACK
+  ok   下移后高亮在第 2 行
+  ok   窗口未滚动 (仍从 SLOT01 开始)
+  ok   右翻页后高亮位于窗口末行
+  ok   窗口滚动后首行 = 003 SLOT03
+  ok   高亮行 = 014 SLOT14
+  ok   再右翻页后高亮位于窗口末行
+  ok   窗口滚动后首行 = 015 SLOT15
+  ok   高亮行 = 026 EMPTY (合成档仅前 20 条)
+  ok   左翻页后高亮在窗口首行
+  ok   高亮行 = 014 SLOT14
+  ok   打开第 12 号槽位详情 (SLOT 012/255)
+  ok   详情页用户名 = USER12
+  ok   按住 A 显示明文 P12
+  ok   返回列表后高亮位置保持
+  ok   连续右跳可直达底部 255/255
+  ok   底部高亮位于窗口末行
+  ok   末行 = 255 EMPTY
+--- 17-list-window-bottom ---
+ ACCOUNTS    255/255
+ 244 EMPTY -
+ 245 EMPTY -
+ 246 EMPTY -
+ 247 EMPTY -
+ 248 EMPTY -
+ 249 EMPTY -
+ 250 EMPTY -
+ 251 EMPTY -
+ 252 EMPTY -
+ 253 EMPTY -
+ 254 EMPTY -
+ 255 EMPTY -
+ L/R=PAGE SEL=USER
+ A=OPEN B=BACK
+  ok   底部再右跳保持 255/255
+  ok   在 255 号空槽按 A 直接进入添加流程
+--- 18-add-at-255 ---
+
+ LABEL (MAX 20)
+ _
+  A B C D E F G H
+  I J K L M N O P
+  Q R S T U V W X
+  Y Z 0 1 2 3 4 5
+  6 7 8 9 . - _ @
+Aa SYM SPACE  DEL OK
+ A=ADD  B=DEL
+ START=OK SEL=ESC
+  ok   取消添加后回到列表且位置保持
+  ok   保存后回到列表 (255 号槽)
+  ok   位置仍是 255/255
+  ok   行文本更新为 255 LAST
+  ok   第 255 槽标签 = LAST
+  ok   第 255 槽用户名为空
+  ok   第 255 槽密码 = 生成的 16 位 (与显示一致)
+  ok   第 255 槽起始地址 = 20336 (存储体 2)
+  ok   第 255 槽位于第 3 个 8KB 存储体
+  ok   跨 3 个存储体 (20416 字节) 校验和正确
+  ok   详情页 START 弹出删除确认
+  ok   删除后 255 号槽恢复 EMPTY
+  ok   删除后 255 号槽 used = 0
+  ok   删除后 SRAM 校验和正确
+
+== 流程 E: v0.3 (PMG3) 存档迁移 -> 新 PIN -> 数据保留 ==
+  ok   迁移样本为 PMG3 旧档
+  ok   迁移样本旧校验和正确
+  ok   旧档槽位 1 = EMAIL / ABC
+  ok   旧档槽位 2 = MIXED / 36 位密码
+  ok   旧档槽位 3 = GENACC / 16 位密码
+  ok   检测到 v0.3 存档, 要求输入旧 4 位 PIN
+--- 19-migrate-oldpin ---
+    SECRET VAULT
+  OLD 4-DIGIT PIN
+     _
+    1     2     3
+    4     5     6
+    7     8     9
+   CLR    0    OK
+  B=DEL  START=OK
+  ok   旧 PIN 输错后错误次数持久化 = 1
+  ok   错误后重新显示旧 PIN 画面
+  ok   旧档错误次数写入后旧校验和仍正确
+  ok   旧 PIN 正确后要求设置新 6 位 PIN
+  ok   迁移: 进入新 PIN 确认画面
+  ok   迁移完成并直接进入主菜单
+--- 20-migrated-menu ---
+
+     VAULT MENU
+  VIEW ACCOUNTS
+  ADD ACCOUNT
+  CHANGE PIN
+  LOCK VAULT
+  RECYCLE BIN
+  SETTINGS
+ A=SELECT
+ PRESS A TO OPEN
+  ok   迁移后 MAGIC = PMG4
+  ok   新 PIN 654321 混淆存储 (3 2 1 0 9 8)
+  ok   迁移后错误次数 = 0
+  ok   迁移后 PIN 标志 = 1
+  ok   迁移后新布局校验和正确
+  ok   迁移后槽位 1 标签/密码保留
+  ok   迁移后槽位 1 用户名留空
+  ok   迁移后槽位 2 的 36 位密码逐字节保留
+  ok   迁移后槽位 3 的生成密码逐字节保留
+  ok   迁移暂存区已清零 (不留密码副本)
+--- 21-migrated-list ---
+ ACCOUNTS    001/255
+ 001 EMAIL
+ 002 MIXED
+ 003 GENACC
+ 004 EMPTY -
+ 005 EMPTY -
+ 006 EMPTY -
+ 007 EMPTY -
+ 008 EMPTY -
+ 009 EMPTY -
+ 010 EMPTY -
+ 011 EMPTY -
+ 012 EMPTY -
+ L/R=PAGE SEL=USER
+ A=OPEN B=BACK
+  ok   迁移后列表显示旧账号
+  ok   迁移记录用户名行为空
+  ok   迁移记录可进入编辑
+  ok   迁移记录补填用户名 OWNER
+  ok   补填用户名写入 SRAM
+  ok   补填用户名后校验和正确
+  ok   迁移后新 PIN 可正常解锁
+  ok   重开后迁移记录的用户名 OWNER 仍在
+  ok   重开后迁移记录的密码 ABC 仍在
+
+== 流程 F: 四项优化 (列表视图/连滚/生成器设置/自动锁屏/回收站) ==
+  ok   流程 F: 解锁进入主菜单
+  ok   设置默认值 = 16 位 / 符号 ON
+--- 22-settings ---
+
+ SETTINGS
+ PASSWORD LENGTH 12
+ SYMBOLS         OFF
+ AUTO-LOCK     1 MIN
+ A/<> = CHANGE
+ B=BACK
+  ok   设置写入头部: 12 位 + 符号 OFF + 有效位
+  ok   自动锁屏 = 1 分钟 (头部 0x0E = 0)
+  ok   列表默认标签视图 (头部 0x0F = 0)
+  ok   设置写入后 SRAM 校验和正确
+  ok   画面上的 12 位密码无符号
+  ok   流程 F: 12 位密码保存后回菜单
+  ok   槽位 4 = SHORT
+  ok   SHORT 用户名为空
+  ok   生成密码长度 = 12 (设置生效)
+  ok   保存密码只含大小写/数字 (符号关闭生效)
+  ok   12 位密码含大写/小写/数字
+  ok   保存密码与画面一致
+  ok   生成器设置写入后校验和正确
+  ok   列表默认显示标签 (001 EMAIL)
+  ok   标签视图提示 SEL=USER
+  ok   用户名视图显示 001 BOBX
+  ok   空用户名显示 003 -
+  ok   SHORT 空用户名显示 004 -
+--- 23-list-user-view ---
+ ACCOUNTS    001/255
+ 001 BOBX
+ 002 abcdefghijklmno
+ 003 -
+ 004 -
+ 005 EMPTY -
+ 006 EMPTY -
+ 007 EMPTY -
+ 008 EMPTY -
+ 009 EMPTY -
+ 010 EMPTY -
+ 011 EMPTY -
+ 012 EMPTY -
+ L/R=PAGE SEL=LABEL
+ A=OPEN B=BACK
+  ok   列表视图模式持久化 (头部 0x0F = 1)
+  ok   切换列表视图后校验和正确
+  ok   按住 DOWN 连续滚动 (从 1 到 5)
+  ok   松开后停止滚动
+--- 24-list-hold-scroll ---
+ ACCOUNTS    005/255
+ 001 BOBX
+ 002 abcdefghijklmno
+ 003 -
+ 004 -
+ 005 EMPTY -
+ 006 EMPTY -
+ 007 EMPTY -
+ 008 EMPTY -
+ 009 EMPTY -
+ 010 EMPTY -
+ 011 EMPTY -
+ 012 EMPTY -
+ L/R=PAGE SEL=LABEL
+ A=OPEN B=BACK
+  ok   切回标签视图持久化 (0x0F = 0)
+  ok   自动锁屏: 3000 帧无操作仍在菜单 (<1 分钟)
+  ok   自动锁屏: 按键重置计时, 再 3000 帧仍在菜单
+  ok   闲置 1 分钟自动回到锁库画面
+--- 25-auto-locked ---
+    SECRET VAULT
+     ENTER PIN
+  _
+    1     2     3
+    4     5     6
+    7     8     9
+   CLR    0    OK
+  B=DEL  START=OK
+  ok   流程 F: 自动锁屏后可重新解锁
+  ok   修改 PIN 画面闲置 1 分钟自动锁屏
+  ok   改 PIN 闲置锁屏后旧 PIN 未被修改 (混淆值不变)
+  ok   流程 F: 改 PIN 闲置锁屏后可重新解锁
+  ok   删除后列表 004 EMPTY
+  ok   删除后槽位 4 used = 0
+  ok   回收站头 MAGIC = BIN1
+  ok   回收站 head = 1
+  ok   回收站条目 used = 0xA5
+  ok   回收站条目标签 = SHORT
+  ok   回收站校验和正确
+  ok   删除后主库校验和仍正确
+  ok   流程 F: 回收站重开解锁
+--- 26-bin ---
+ RECYCLE BIN
+ 01 SHORT
+ A=RESTORE B=BACK
+  ok   回收站显示 01 SHORT (断电后仍在)
+  ok   回收站恢复条目并清空
+  ok   恢复后槽位 4 = SHORT
+  ok   恢复后回收站条目已清空
+  ok   恢复后主库校验和正确
+  ok   恢复后列表 004 SHORT
+  ok   流程 F: v0.3.1 旧档解锁成功
+  ok   v0.3.1 旧档默认生成长度 16
+  ok   v0.3.1 旧档默认符号 ON
+  ok   v0.3.1 旧档默认锁屏 3 分钟
+  ok   读取旧档默认值不写设置区 (保持 0)
+  ok   v0.3.1 旧档列表默认标签视图
+
+==============================
+断言: 224 / 224 通过
+全部通过
