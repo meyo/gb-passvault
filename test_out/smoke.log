@@ -37,11 +37,11 @@
          ^
     GB PASSWORD
        VAULT
-       V0.3.6
+       V0.3.6.1
     PRESS START
  BATTERY CART NEEDED
   ok   标题文字 GB PASSWORD
-  ok   标题版本 V0.3.6
+  ok   标题版本 V0.3.6.1
   ok   进入设置 6 位 PIN 画面
 --- 02-newpin ---
     SECRET VAULT
@@ -73,7 +73,7 @@
  [ LOCK VAULT
  \ RECYCLE BIN
  ] SETTINGS
- A=SELECT B+SEL=LOCK
+ HOLD B=QUICK LOCK
  PRESS A TO OPEN
   ok   ROM 头声明 32KB SRAM (0x149 = 0x03)
   ok   SRAM 快照 = 32768 字节 (4 x 8KB 存储体)
@@ -96,7 +96,7 @@
  [ LOCK VAULT
  \ RECYCLE BIN
  ] SETTINGS
- A=SELECT B+SEL=LOCK
+ HOLD B=QUICK LOCK
  PRESS A TO OPEN
   ok   槽位 1 used = 0xA5
   ok   槽位 1 标签 = EMAIL
@@ -115,7 +115,7 @@
  [ LOCK VAULT
  \ RECYCLE BIN
  ] SETTINGS
- A=SELECT B+SEL=LOCK
+ HOLD B=QUICK LOCK
  PRESS A TO OPEN
   ok   槽位 2 标签 = 20 字符完整保存
   ok   槽位 2 用户名 = 20 字符完整保存
@@ -128,7 +128,7 @@
 --- 05c-generated-password ---
 
  PASSWORD (MAX 36)
- nwQ(Np7(xuy2(b_
+ 9(55(8&ouywKpL_
   A B C D E F G H
   I J K L M N O P
   Q R S T U V W X
@@ -149,7 +149,7 @@ Aa SYM SPACE  DEL OK
   ok   进入账号列表
 --- 06-list ---
  ACCOUNTS    001/255
-         B+SEL=LOCK
+         HOLD B=LOCK
  001 EMAIL
  002 ABCDEFGHIJKLMN
  003 GENACC
@@ -173,7 +173,7 @@ Aa SYM SPACE  DEL OK
   ok   跑马灯回滚显示标签头部
 --- 06b-list-marquee ---
  ACCOUNTS    002/255
-         B+SEL=LOCK
+         HOLD B=LOCK
  001 EMAIL
  002 ABCDEFGHIJKLMN
  003 GENACC
@@ -192,11 +192,11 @@ Aa SYM SPACE  DEL OK
 --- 07-detail-masked ---
  SLOT 001/255
   LABEL:          X
-EMAIL
+ EMAIL
   USER:           Z
-BOB
+ BOB
   PASS:           [
-***
+ ***
  A=REVEAL B=BACK
  SEL+START=EDIT
  START=DELETE
@@ -206,11 +206,11 @@ BOB
 --- 08-detail-reveal ---
  SLOT 001/255
   LABEL:          X
-EMAIL
+ EMAIL
   USER:           Z
-BOB
+ BOB
   PASS:           [
-ABC
+ ABC
  A=REVEAL B=BACK
  SEL+START=EDIT
  START=DELETE
@@ -222,11 +222,11 @@ ABC
 --- 08b-detail-edited ---
  SLOT 001/255
   LABEL:          X
-EMAIL
+ EMAIL
   USER:           Z
-BOBX
+ BOBX
   PASS:           [
-***
+ ***
  A=REVEAL B=BACK
  SEL+START=EDIT
  START=DELETE
@@ -305,12 +305,12 @@ BOBX
  [ LOCK VAULT
  \ RECYCLE BIN
  ] SETTINGS
- A=SELECT B+SEL=LOCK
+ HOLD B=QUICK LOCK
  PRESS A TO OPEN
   ok   进入账号列表
 --- 14-list-persisted ---
  ACCOUNTS    001/255
-         B+SEL=LOCK
+         HOLD B=LOCK
  001 EMAIL
  002 ABCDEFGHIJKLMN
  003 GENACC
@@ -330,25 +330,25 @@ BOBX
 --- 15-reveal-persisted ---
  SLOT 001/255
   LABEL:          X
-EMAIL
+ EMAIL
   USER:           Z
-BOBX
+ BOBX
   PASS:           [
-ABC
+ ABC
  A=REVEAL B=BACK
  SEL+START=EDIT
  START=DELETE
   ok   断电重开后密码 ABC / 用户名 BOBX 仍在
-  ok   36 位密码打码 (行7=20颗 行8=16颗)
+  ok   36 位密码打码 (行7=18颗 行8=18颗)
 --- 15b-detail-long-reveal ---
  SLOT 002/255
   LABEL:          X
-ABCDEFGHIJKLMNOPQRST
+ ABCDEFGHIJKLMNOPQ>
   USER:           Z
-abcdefghijklmnopqrst
+ abcdefghijklmnopq>
   PASS:           [
-aB3!xY9#qW2$eR5%tY8&
-uI1(uO4)Kz6_@b?!
+ aB3!xY9#qW2$eR5%tY
+ 8&uI1(uO4)Kz6_@b?!
  A=REVEAL B=BACK
  SEL+START=EDIT
  START=DELETE
@@ -362,7 +362,7 @@ uI1(uO4)Kz6_@b?!
   ok   SLOT13 不在初始窗口
 --- 16-list-window-top ---
  ACCOUNTS    001/255
-         B+SEL=LOCK
+         HOLD B=LOCK
  001 SLOT01
  002 SLOT02
  003 SLOT03
@@ -396,7 +396,7 @@ uI1(uO4)Kz6_@b?!
   ok   末行 = 255 EMPTY
 --- 17-list-window-bottom ---
  ACCOUNTS    255/255
-         B+SEL=LOCK
+         HOLD B=LOCK
  244 EMPTY -
  245 EMPTY -
  246 EMPTY -
@@ -471,7 +471,7 @@ Aa SYM SPACE  DEL OK
  [ LOCK VAULT
  \ RECYCLE BIN
  ] SETTINGS
- A=SELECT B+SEL=LOCK
+ HOLD B=QUICK LOCK
  PRESS A TO OPEN
   ok   迁移后 MAGIC = PMG4
   ok   新 PIN 654321 混淆存储 (3 2 1 0 9 8)
@@ -485,7 +485,7 @@ Aa SYM SPACE  DEL OK
   ok   迁移暂存区已清零 (不留密码副本)
 --- 21-migrated-list ---
  ACCOUNTS    001/255
-         B+SEL=LOCK
+         HOLD B=LOCK
  001 EMAIL
  002 MIXED
  003 GENACC
@@ -520,7 +520,7 @@ Aa SYM SPACE  DEL OK
  SYMBOLS        OFF
  AUTO-LOCK    1 MIN
  A/<> = CHANGE
- B=BACK
+ B=BACK (HOLD=LOCK)
   ok   设置写入头部: 12 位 + 符号 OFF + 有效位
   ok   自动锁屏 = 1 分钟 (头部 0x0E = 0)
   ok   列表默认标签视图 (头部 0x0F = 0)
@@ -541,7 +541,7 @@ Aa SYM SPACE  DEL OK
   ok   SHORT 空用户名显示 004 -
 --- 23-list-user-view ---
  ACCOUNTS    001/255
-         B+SEL=LOCK
+         HOLD B=LOCK
  001 BOBX
  002 abcdefghijklmn
  003 -
@@ -562,7 +562,7 @@ Aa SYM SPACE  DEL OK
   ok   松开后停止滚动
 --- 24-list-hold-scroll ---
  ACCOUNTS    007/255
-         B+SEL=LOCK
+         HOLD B=LOCK
  001 BOBX
  002 abcdefghijklmn
  003 -
@@ -591,7 +591,7 @@ Aa SYM SPACE  DEL OK
    CLR    0    OK
   B=DEL  START=OK
   ok   流程 F: 自动锁屏后可重新解锁
-  ok   B+SELECT 快速锁定回 PIN 画面
+  ok   长按 B 1.5 秒快速锁定回 PIN 画面
   ok   流程 F: 快速锁定后可重新解锁
   ok   修改 PIN 先验证旧 PIN 成功
   ok   修改新 PIN 画面闲置 1 分钟自动锁屏

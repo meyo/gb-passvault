@@ -488,7 +488,7 @@ try {
     waitOk(() => screenText().includes('PRESS START'), '标题画面出现 PRESS START');
     dump('01-title');
     ok(screenText().includes('GB PASSWORD'), '标题文字 GB PASSWORD');
-    ok(screenText().includes('V0.3.6'), '标题版本 V0.3.6');
+    ok(screenText().includes('V0.3.6.1'), '标题版本 V0.3.6.1');
 
     if (!tapUntil('START', () => pinScreenReady('NEW PIN', 6), 300, 8)) throw new Error('无法进入设置 PIN 画面');
     ok(true, '进入设置 6 位 PIN 画面');
@@ -745,10 +745,10 @@ try {
     frames(5);
     const stars7 = (rowText(7).match(/\*/g) || []).length;
     const stars8 = (rowText(8).match(/\*/g) || []).length;
-    ok(stars7 === 20 && stars8 === 16, '36 位密码打码 (行7=20颗 行8=16颗)');
+    ok(stars7 === 18 && stars8 === 18, '36 位密码打码 (行7=18颗 行8=18颗)');
     hold('A', 40);
     dump('15b-detail-long-reveal', ['A']);
-    ok((rowText(7) + rowText(8)).trimEnd() === LONG, '按住 A 显示 36 位明文 (两行)');
+    ok(rowText(7).trim() + rowText(8).trim() === LONG, '按住 A 显示 36 位明文 (两行)');
     frames(10);
 
     console.log();
@@ -1036,14 +1036,16 @@ try {
     enterPin('123456');
     waitOk(() => screenText().includes('VAULT MENU'), '流程 F: 自动锁屏后可重新解锁');
 
-    /* --- 快速锁定: B+SELECT (非输入画面) --- */
+    /* --- 快速锁定: 菜单长按 B 1.5 秒; 短按 B 仍为返回 --- */
     frames(3);
     let quickLocked = false;
-    for (let t = 0; t < 5 && !quickLocked; t++) {
-        chord(['B', 'SELECT']);
-        quickLocked = waitUntil(() => pinScreenReady('ENTER PIN', 6), 120);
+    for (let t = 0; t < 240 && !quickLocked; t++) {
+        gb.pressKey('B');
+        gb.doFrame();
+        quickLocked = screenText().includes('ENTER PIN');
     }
-    ok(quickLocked, 'B+SELECT 快速锁定回 PIN 画面');
+    if (!quickLocked) quickLocked = waitUntil(() => screenText().includes('ENTER PIN'), 240);
+    ok(quickLocked, '长按 B 1.5 秒快速锁定回 PIN 画面');
     if (!quickLocked) throw new Error('快速锁定未触发');
     enterPin('123456');
     waitOk(() => screenText().includes('VAULT MENU'), '流程 F: 快速锁定后可重新解锁');

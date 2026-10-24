@@ -1,5 +1,5 @@
 /*
- * GB Password Vault v0.3.6
+ * GB Password Vault v0.3.6.1
  * ------------------------------------------------------------------
  * 在真实 Game Boy (DMG / GBC 兼容模式 / GBA) 上运行的离线密码管理器。
  * 编译工具链: GBDK-2020 4.5.0  (C/SDCC)
@@ -673,11 +673,69 @@ static uint8_t ui_getkey(uint8_t mask)
     }
 }
 
-/* 快速锁库: 非输入画面同时按 B+SELECT.
- * 输入/PIN 画面不启用, 避免与 B=删除/返回冲突. */
-static uint8_t lock_chord(uint8_t j)
+/* 快速锁库: 非输入画面长按 B 约 1.5 秒; 短按 B 仍然返回.
+ * 用 TIMA (4KHz) 非阻塞计时: 24 次溢出 x 62.5ms = 1.5s.
+ * 不阻塞当前帧, 便于与输入轮询共存. */
+#define B_HOLD_TICKS 24
+#define KEY_LOCKED   0xFF
+
+static uint8_t b_hold_active;
+static uint8_t b_hold_prev_tima;
+static uint8_t b_hold_ticks;
+
+static void b_hold_reset(void)
 {
-    return (uint8_t)((j & (J_B | J_SELECT)) == (J_B | J_SELECT));
+    b_hold_active = 0;
+    b_hold_ticks = 0;
+    b_hold_prev_tima = TIMA_REG;
+}
+
+/* 返回 0=继续, 1=短按 B 释放(返回), 2=长按 B 达到阈值(锁库) */
+static uint8_t b_hold_poll(uint8_t j)
+{
+    uint8_t t = TIMA_REG;
+
+    if (!(j & J_B)) {
+        if (b_hold_active) {
+            b_hold_active = 0;
+            if (b_hold_ticks < B_HOLD_TICKS) return 1;
+        }
+        b_hold_prev_tima = t;
+        return 0;
+    }
+    if (!b_hold_active) {
+        b_hold_active = 1;
+        b_hold_ticks = 0;
+        b_hold_prev_tima = t;
+        return 0;
+    }
+    if (t < b_hold_prev_tima) b_hold_ticks++;
+    b_hold_prev_tima = t;
+    if (b_hold_ticks >= B_HOLD_TICKS) {
+        b_hold_active = 0;
+        return 2;
+    }
+    return 0;
+}
+
+/* 非输入画面的 getkey: B 由 b_hold_poll 统一处理, 其余键走按下沿. */
+static uint8_t ui_getkey_noninput(uint8_t mask)
+{
+    uint8_t prev = 0, j, r;
+
+    b_hold_reset();
+    while (1) {
+        j = joypad();
+        if (idle_poll(j)) return 0;
+        r = b_hold_poll(j);
+        if (r == 2) return KEY_LOCKED;
+        if (r == 1) return J_B;
+        if ((j & mask & (uint8_t)~J_B) && !(prev & mask & (uint8_t)~J_B)) {
+            waitpadup();
+            return (uint8_t)(j & mask & (uint8_t)~J_B);
+        }
+        prev = j;
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -751,14 +809,6 @@ static void draw_frame(uint8_t x, uint8_t y, uint8_t w, uint8_t h)
     for (i = 1; i < (uint8_t)(w - 1); i++) row[i] = 199;
     row[w - 1] = 200;
     set_bkg_tiles(x, (uint8_t)(y + h - 1), w, 1, row);
-}
-
-static void draw_hline(uint8_t y)
-{
-    uint8_t i;
-    put_tile(0, y, 192);
-    for (i = 1; i < 19; i++) put_tile(i, y, 193);
-    put_tile(19, y, 194);
 }
 
 static void toast(const char *msg)
@@ -1356,7 +1406,7 @@ static void draw_slot_list(const char *title)
     put_str(1, 0, title);
     fmt_pos(pos, (uint16_t)(list_sel + 1));
     put_str(13, 0, pos);
-    put_str(9, 1, "B+SEL=LOCK");
+    put_str(9, 1, "HOLD B=LOCK");
     draw_frame(0, 2, 20, 14);
 
     for (r = 0; r < LIST_ROWS; r++) {
@@ -1393,16 +1443,32 @@ static uint8_t sel_text_len(void)
 
 static void draw_pass_line(uint8_t reveal)
 {
-    char line[21];
+    char line[19];
     uint8_t j, off, n = cur.plen;
     for (off = 0; off < 2; off++) {
-        for (j = 0; j < 20; j++) {
-            uint8_t idx = (uint8_t)(off * 20 + j);
+        for (j = 0; j < 18; j++) {
+            uint8_t idx = (uint8_t)(off * 18 + j);
             line[j] = (idx < n) ? (reveal ? cur.pass[idx] : '*') : ' ';
         }
-        line[20] = 0;
-        put_str(0, (uint8_t)(7 + off), line);
+        line[18] = 0;
+        put_str(1, (uint8_t)(7 + off), line);
     }
+}
+
+/* 详情页字段宽 18; 超长时截断并显示 '>' 提示, 原数据不受影响. */
+static void put_detail_value(uint8_t y, const char *s)
+{
+    char tmp[19];
+    uint8_t i, n = (uint8_t)strlen(s);
+
+    if (n <= 18) {
+        put_fixed(1, y, s, 18, 0);
+        return;
+    }
+    for (i = 0; i < 17; i++) tmp[i] = s[i];
+    tmp[17] = '>';
+    tmp[18] = 0;
+    put_fixed(1, y, tmp, 18, 0);
 }
 
 static void draw_detail(uint16_t i)
@@ -1411,17 +1477,16 @@ static void draw_detail(uint16_t i)
     screen_clear();
     fmt_slot_title(t, (uint16_t)(i + 1));
     put_str(1, 0, t);
-    draw_hline(1);
+    draw_frame(0, 1, 20, 14);
     put_fixed(1, 2, " LABEL:", 7, 1);
     put_tile(18, 2, 248);
-    put_fixed(0, 3, cur.label, LBL_MAX, 0);
+    put_detail_value(3, cur.label);
     put_fixed(1, 4, " USER:", 6, 1);
     put_tile(18, 4, 250);
-    put_fixed(0, 5, cur.user, USR_MAX, 0);
+    put_detail_value(5, cur.user);
     put_fixed(1, 6, " PASS:", 6, 1);
     put_tile(18, 6, 251);
     draw_pass_line(0);
-    draw_hline(14);
     put_str(1, 15, "A=REVEAL B=BACK");
     put_str(1, 16, "SEL+START=EDIT");
     put_str(1, 17, "START=DELETE");
@@ -1462,11 +1527,12 @@ static uint8_t edit_flow(uint16_t i)
 
 static uint8_t detail_screen(uint16_t i)
 {
-    uint8_t prev = 0, reveal = 0, pressed, k;
+    uint8_t prev = 0, reveal = 0, pressed, k, r;
 
     slot_read(i, &cur);
     if (!cur.used) return 0;
 
+    b_hold_reset();
     draw_detail(i);
     /* 纯 joypad 忙轮询 (每帧数千次): 不依赖 HALT/中断帧同步,
      * 否则模拟器 (serverboy) 的 HALT 唤醒会被按键事件打断, 点按会丢。 */
@@ -1475,7 +1541,9 @@ static uint8_t detail_screen(uint16_t i)
         pressed = (uint8_t)(j & ~prev);
 
         if (idle_poll(j)) return 1;
-        if (lock_chord(j)) { waitpadup(); return 1; }
+        r = b_hold_poll(j);
+        if (r == 2) return 1;
+        if (r == 1) return 0;
 
         if ((j & J_A) && !reveal) { reveal = 1; draw_pass_line(1); }
         else if (!(j & J_A) && reveal) { reveal = 0; draw_pass_line(0); }
@@ -1490,8 +1558,6 @@ static uint8_t detail_screen(uint16_t i)
             prev = joypad();
             continue;
         }
-
-        if (pressed & J_B) { waitpadup(); return 0; }
 
         if (pressed & J_START) {
             put_str(1, 13, "DELETE THIS SLOT?");
@@ -1555,9 +1621,10 @@ static uint8_t add_flow(int16_t slot)
 static uint8_t list_screen(void)
 {
     uint8_t prev = 0, off = 0, dir = 1, sel_len, delay_left, step_div = 0;
-    uint8_t prev_tima, hold = 0, hold_wait = 0, hold_div = 0;
+    uint8_t prev_tima, hold = 0, hold_wait = 0, hold_div = 0, r;
 
     list_ensure_visible();
+    b_hold_reset();
     draw_slot_list("ACCOUNTS");
     sel_len = sel_text_len();
     delay_left = SCROLL_LEAD;
@@ -1571,12 +1638,14 @@ static uint8_t list_screen(void)
         uint8_t redraw = 0;
 
         if (idle_poll(j)) return 1;
-        if (lock_chord(j)) { waitpadup(); return 1; }
+        r = b_hold_poll(j);
+        if (r == 2) return 1;
+        if (r == 1) return 0;
         prev = j;
         if ((hold == 1 && !(j & J_UP)) || (hold == 2 && !(j & J_DOWN)))
             hold = 0;
 
-        if (pressed & (J_B | J_START)) return 0;
+        if (pressed & J_START) return 0;
 
         if (pressed & J_SELECT) {               /* 标签 / 用户名视图切换 */
             list_user = (uint8_t)(!list_user);
@@ -1723,15 +1792,15 @@ static uint8_t bin_screen(void)
         if (!n) {
             put_tile(9, 3, 252);
             put_str(3, 5, "BIN EMPTY");
-            put_str(1, 17, "B=BACK");
+            put_str(1, 17, "B=BACK (HOLD=LOCK)");
         } else {
             put_str(1, 16, "A=RESTORE SEL=DEL");
             put_str(1, 17, "START=EMPTY B=BACK");
         }
 
-        k = ui_getkey(J_UP | J_DOWN | J_A | J_B | J_SELECT | J_START);
+        k = ui_getkey_noninput(J_UP | J_DOWN | J_A | J_B | J_SELECT | J_START);
         if (!k) return 1;
-        if (lock_chord(k)) return 1;
+        if (k == KEY_LOCKED) return 1;
         if (k & J_B) return 0;
         if (!n) continue;
         if (k & J_UP)   { if (sel) sel--; continue; }
@@ -2083,7 +2152,7 @@ static uint8_t migrate_v03(void)
 
     screen_clear();
     put_str(2, 4, "SAVE UPGRADED");
-    put_str(1, 6, "V0.3.6 READY");
+    put_str(1, 6, "V0.3.6.1 READY");
     delay(1800);
     return 1;
 }
@@ -2115,11 +2184,11 @@ static uint8_t settings_screen(void)
         }
 
         put_str(1, 16, "A/<> = CHANGE");
-        put_str(1, 17, "B=BACK");
+        put_str(1, 17, "B=BACK (HOLD=LOCK)");
 
-        k = ui_getkey(J_UP | J_DOWN | J_LEFT | J_RIGHT | J_A | J_B | J_SELECT);
+        k = ui_getkey_noninput(J_UP | J_DOWN | J_LEFT | J_RIGHT | J_A | J_B);
         if (!k) return 1;
-        if (lock_chord(k)) return 1;
+        if (k == KEY_LOCKED) return 1;
         if (k & J_B) return 0;
         if (k & J_UP)   { if (sel) sel--; continue; }
         if (k & J_DOWN) { if (sel < 2) sel++; continue; }
@@ -2162,11 +2231,11 @@ static uint8_t menu_screen(void)
                 put_str(3, y, items[i]);
             }
         }
-        put_str(1, 16, "A=SELECT B+SEL=LOCK");
+        put_str(1, 16, "HOLD B=QUICK LOCK");
         put_str(1, 17, "PRESS A TO OPEN");
-        k = ui_getkey(J_UP | J_DOWN | J_A | J_B | J_SELECT);
+        k = ui_getkey_noninput(J_UP | J_DOWN | J_A | J_B);
         if (!k) return 1;
-        if (lock_chord(k)) return 1;
+        if (k == KEY_LOCKED) return 1;
         if (k & J_UP)   { if (sel) sel--; continue; }
         if (k & J_DOWN) { if (sel < 5) sel++; continue; }
         if (k & J_A) {
@@ -2216,7 +2285,7 @@ void main(void)
     put_tile(9, 2, 254);
     put_str(4, 3, "GB PASSWORD");
     put_str(7, 5, "VAULT");
-    put_str(7, 8, "V0.3.6");
+    put_str(7, 8, "V0.3.6.1");
     put_str(4, 11, "PRESS START");
     put_str(1, 16, "BATTERY CART NEEDED");
     getkey(J_START);
