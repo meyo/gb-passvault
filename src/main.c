@@ -1,5 +1,5 @@
 /*
- * GB Password Vault v0.3.6.1
+ * GB Password Vault v0.3.7
  * ------------------------------------------------------------------
  * 在真实 Game Boy (DMG / GBC 兼容模式 / GBA) 上运行的离线密码管理器。
  * 编译工具链: GBDK-2020 4.5.0  (C/SDCC)
@@ -15,19 +15,21 @@
  *   - 列表页:   12 行滚动窗口 + 右上角位置 (nnn/255), 上下步进 / 左右跳 8 条;
  *              选中行标签超过 14 字符时来回跑马灯显示
  *   - 详情页:   按住 A 显示密码明文 (分两行), SELECT+START 编辑, START 删除
- *   - 存档升级: 识别 v0.3 的 PMG3 存档, 验证旧 4 位 PIN 后迁移到新布局
- *   - 全部数据即时写入 SRAM (带全局校验和), 关机不丢
+ *   - 存档升级: PMG3 验证旧 PIN 后迁移; PMG4 自动就地升级到 PMG5
+ *   - 全部数据即时写入 SRAM; PMG5 双头 + 记录 CRC16 + WAL 写前日志
  *
  * SRAM 布局 (平面地址; MBC1 模式 1 下经 0x4000 切 8KB 存储体):
- *   0x0000  MAGIC  "PMG4"
- *   0x0004  PIN    6 字节混淆值 ((digit+7) % 10)
- *   0x000A  TRIES  连续错误次数 (达到 3 进入锁定)
- *   0x000B  CHK    全局校验和 (前面各字节 + 槽位区 XOR, 种子 0xA5)
- *   0x000C  FLAGS  bit0 = 已设置 PIN
+ *   0x0000  PMG4 兼容低头 (MAGIC/PIN/TRIES/XOR/FLAGS/设置)
  *   0x0010  槽位区 255 x 80 字节:
  *          [0] used(0xA5) [1] llen [2..21] label [22] ulen
  *          [23..42] user [43] plen [44..79] pass
- *   总长 16 + 255*80 = 20416 字节, 跨存储体 0/1/2 (卡带需 32KB SRAM)
+ *   0x4FC0  回收站 BIN1 + 16 x 80 字节
+ *   0x54D0  PMG5 双头 A
+ *   0x54F0  PMG5 双头 B
+ *   0x5510  槽位 CRC16 表 255 x 2
+ *   0x5710  回收站 CRC16 表 16 x 2
+ *   0x5800  WAL 写前日志 (commit + 变长 old/new 段)
+ *   低区继续维护 PMG4 全局 XOR, 便于旧版只读; PMG5 高区是权威格式.
  *
  * v0.3 (PMG3) 旧布局仅用于迁移:
  *   PIN 4 字节 @4, TRIES @8, CHK @9, FLAGS @10, 槽位 255 x 47 字节, 共 12001 字节
@@ -76,6 +78,8 @@
 #define LOAD_LEGACY       2
 #define LOAD_CORRUPT      3
 #define LOAD_UNSUPPORTED  4
+#define LOAD_PM4          5
+#define LOAD_DAMAGED      6
 
 #define SR ((volatile uint8_t *)0xA000)
 
@@ -224,13 +228,302 @@ static void wb(uint16_t a, uint8_t v)
     SR[a & 0x1FFF] = v;
 }
 
+/* ------------------------------------------------------------------ */
+/* PMG5: 兼容 PMG4 数据区 + 高区双头 / 记录 CRC16 / 写前日志             */
+/*                                                                      */
+/* 低区 0x0000..0x54CF 仍保持 PMG4 布局与全局 XOR 校验和, 以便旧版只读   */
+/* 兼容; PMG5 的权威头在 0x54D0/0x54F0, 记录 CRC 表在 0x5510, WAL 在     */
+/* 0x5800. 所有正常写操作先写 WAL, 再改目标, 最后清 WAL.                */
+/* ------------------------------------------------------------------ */
+
+#define PM5_HDR_A       ((uint16_t)0x54D0)
+#define PM5_HDR_B       ((uint16_t)0x54F0)
+#define PM5_HDR_SIZE    32
+#define PM5_H_VER       4
+#define PM5_H_STATE     5
+#define PM5_H_SEQ       6
+#define PM5_H_CRC       8
+#define PM5_H_PIN       10
+#define PM5_H_TRIES     16
+#define PM5_H_FLAGS     17
+#define PM5_H_GEN       18
+#define PM5_H_LOCK      19
+#define PM5_H_LIST      20
+#define PM5_VERSION     1
+#define PM5_READY       1
+
+#define PM5_REC_CRC     ((uint16_t)0x5510)   /* 255 * 2 = 510 */
+#define PM5_BIN_CRC     ((uint16_t)0x5710)   /* 16 * 2 = 32  */
+#define PM5_WAL_BASE    ((uint16_t)0x5800)
+#define PM5_WAL_MAX     256
+#define PM5_WAL_COMMIT  PM5_WAL_BASE
+#define PM5_WAL_HDR     10
+#define PM5_WAL_PAYLOAD (PM5_WAL_BASE + PM5_WAL_HDR)
+
+#define FLAG_PM5        0x80
+
+static uint8_t  pm5_active;
+static uint16_t pm5_seq;
+static uint8_t  bad_slots[(N_SLOTS + 7) / 8];
+static uint8_t  bad_bin[(BIN_SLOTS + 7) / 8];
+static uint16_t vault_bad_count;
+static uint8_t  damage_ack;
+static void pm5_build_tables(void);
+static void pm5_scan_crc(void);
+static uint16_t bin_crc_addr(uint8_t i);
+static uint8_t  wal_buf[PM5_WAL_MAX];
+static uint16_t wal_len;
+static uint8_t  wal_nseg;
+
+/* CRC16/CCITT-FALSE: init 0xFFFF, poly 0x1021, 不反射、不 xorout. */
+static uint16_t crc16_update(uint16_t c, uint8_t b)
+{
+    uint8_t i;
+    c ^= (uint16_t)((uint16_t)b << 8);
+    for (i = 0; i < 8; i++)
+        c = (c & 0x8000) ? (uint16_t)((c << 1) ^ 0x1021) : (uint16_t)(c << 1);
+    return c;
+}
+
+static uint16_t crc16_buf(const uint8_t *p, uint16_t n)
+{
+    uint16_t c = 0xFFFF;
+    while (n--) c = crc16_update(c, *p++);
+    return c;
+}
+
+/* 调用者必须已 sram_on(). */
+static uint16_t crc16_sram(uint16_t a, uint16_t n)
+{
+    uint16_t c = 0xFFFF;
+    while (n--) c = crc16_update(c, rb(a++));
+    return c;
+}
+
+/* 调用者必须已 sram_on(). */
+static uint16_t rd16(uint16_t a)
+{
+    return (uint16_t)((uint16_t)rb(a) | ((uint16_t)rb((uint16_t)(a + 1)) << 8));
+}
+
+/* 调用者必须已 sram_on(). */
+static void wr16(uint16_t a, uint16_t v)
+{
+    wb(a, (uint8_t)(v & 0xFF));
+    wb((uint16_t)(a + 1), (uint8_t)(v >> 8));
+}
+
+static void pm5_hdr_write(uint16_t a, uint16_t seq, uint8_t state)
+{
+    uint8_t b[PM5_HDR_SIZE];
+    uint8_t i;
+    uint16_t c = 0xFFFF;
+
+    memset(b, 0, sizeof(b));
+    b[0] = 'P'; b[1] = 'M'; b[2] = 'G'; b[3] = '5';
+    b[PM5_H_VER] = PM5_VERSION;
+    b[PM5_H_STATE] = state;
+    b[PM5_H_SEQ] = (uint8_t)(seq & 0xFF);
+    b[PM5_H_SEQ + 1] = (uint8_t)(seq >> 8);
+    for (i = 0; i < PIN_LEN; i++) b[PM5_H_PIN + i] = pin_obf[i];
+    b[PM5_H_TRIES] = tries;
+    b[PM5_H_FLAGS] = pin_set ? FLAG_PINSET : 0x00;
+    b[PM5_H_GEN] = (uint8_t)(gen_idx | (gen_sym ? 0x04 : 0x00) | SET_VALID);
+    b[PM5_H_LOCK] = lock_idx;
+    b[PM5_H_LIST] = list_user ? 1 : 0;
+    for (i = 0; i < PM5_HDR_SIZE; i++) {
+        if (i != PM5_H_CRC && i != PM5_H_CRC + 1)
+            c = crc16_update(c, b[i]);
+    }
+    b[PM5_H_CRC] = (uint8_t)(c & 0xFF);
+    b[PM5_H_CRC + 1] = (uint8_t)(c >> 8);
+
+    sram_on();
+    for (i = 0; i < PM5_HDR_SIZE; i++) wb((uint16_t)(a + i), b[i]);
+    sram_off();
+}
+
+static uint8_t pm5_hdr_valid(uint16_t a, uint16_t *seq)
+{
+    uint8_t i;
+    uint16_t c = 0xFFFF;
+
+    if (rb(a) != 'P' || rb((uint16_t)(a + 1)) != 'M' ||
+        rb((uint16_t)(a + 2)) != 'G' || rb((uint16_t)(a + 3)) != '5') return 0;
+    if (rb((uint16_t)(a + PM5_H_VER)) != PM5_VERSION) return 0;
+    if (rb((uint16_t)(a + PM5_H_STATE)) != PM5_READY) return 0;
+    for (i = 0; i < PM5_HDR_SIZE; i++) {
+        if (i != PM5_H_CRC && i != PM5_H_CRC + 1)
+            c = crc16_update(c, rb((uint16_t)(a + i)));
+    }
+    if (c != rd16((uint16_t)(a + PM5_H_CRC))) return 0;
+    *seq = rd16((uint16_t)(a + PM5_H_SEQ));
+    return 1;
+}
+
+/* 读取双头中有效且 seq 较新的一个; 成功时加载 PIN/设置并设置 pm5_active. */
+static uint8_t pm5_hdr_load(void)
+{
+    uint16_t sa = 0, sb = 0, a, s;
+    uint8_t va, vb, i, g;
+
+    sram_on();
+    va = pm5_hdr_valid(PM5_HDR_A, &sa);
+    vb = pm5_hdr_valid(PM5_HDR_B, &sb);
+    if (!va && !vb) { sram_off(); return 0; }
+    if (va && (!vb || sa >= sb)) { a = PM5_HDR_A; s = sa; }
+    else                         { a = PM5_HDR_B; s = sb; }
+
+    for (i = 0; i < PIN_LEN; i++) pin_obf[i] = rb((uint16_t)(a + PM5_H_PIN + i));
+    tries = rb((uint16_t)(a + PM5_H_TRIES));
+    if (tries > 3) tries = 3;
+    pin_set = (rb((uint16_t)(a + PM5_H_FLAGS)) & FLAG_PINSET) ? 1 : 0;
+    g = rb((uint16_t)(a + PM5_H_GEN));
+    if (g & SET_VALID) {
+        gen_idx = (uint8_t)(g & 3);
+        if (gen_idx > 3) gen_idx = 1;
+        gen_sym = (g & 0x04) ? 1 : 0;
+        lock_idx = rb((uint16_t)(a + PM5_H_LOCK));
+        if (lock_idx > 4) lock_idx = 2;
+        list_user = (uint8_t)(rb((uint16_t)(a + PM5_H_LIST)) & 1);
+    } else {
+        gen_idx = 1; gen_sym = 1; lock_idx = 2; list_user = 0;
+    }
+    pm5_seq = s;
+    pm5_active = 1;
+    bin_ready = 0;
+    sram_off();
+    return 1;
+}
+
+static void pm5_hdr_save(void)
+{
+    uint16_t s = (uint16_t)(pm5_seq + 1);
+    pm5_seq = s;
+    pm5_hdr_write(PM5_HDR_A, s, PM5_READY);
+    pm5_hdr_write(PM5_HDR_B, s, PM5_READY);
+}
+
+/* ------------------------------------------------------------------ */
+/* WAL: 固定提交字节 + 变长 payload; payload 为若干 old/new 段.           */
+/* 段格式: addr_lo, addr_hi, len, old[len], new[len]                     */
+/* ------------------------------------------------------------------ */
+
+static void wal_reset(void)
+{
+    wal_len = 0;
+    wal_nseg = 0;
+}
+
+static void wal_add(uint16_t a, uint8_t n, const uint8_t *oldb, const uint8_t *newb)
+{
+    uint8_t i;
+    if ((uint16_t)(wal_len + 4u + (uint16_t)n * 2u) > PM5_WAL_MAX) return;
+    wal_buf[wal_len++] = (uint8_t)(a & 0xFF);
+    wal_buf[wal_len++] = (uint8_t)(a >> 8);
+    wal_buf[wal_len++] = n;
+    for (i = 0; i < n; i++) wal_buf[wal_len++] = oldb[i];
+    for (i = 0; i < n; i++) wal_buf[wal_len++] = newb[i];
+    wal_nseg++;
+}
+
+static void wal_clear(void)
+{
+    sram_on();
+    wb(PM5_WAL_COMMIT, 0x00);
+    sram_off();
+}
+
+static void wal_commit(void)
+{
+    uint8_t i;
+    uint16_t c = 0xFFFF;
+
+    sram_on();
+    wb(PM5_WAL_COMMIT, 0x00);       /* 先让旧日志失效 */
+    wb((uint16_t)(PM5_WAL_BASE + 1), 'W');
+    wb((uint16_t)(PM5_WAL_BASE + 2), 'A');
+    wb((uint16_t)(PM5_WAL_BASE + 3), 'L');
+    wb((uint16_t)(PM5_WAL_BASE + 4), '5');
+    wb((uint16_t)(PM5_WAL_BASE + 5), wal_nseg);
+    wb((uint16_t)(PM5_WAL_BASE + 6), (uint8_t)(wal_len & 0xFF));
+    wb((uint16_t)(PM5_WAL_BASE + 7), (uint8_t)(wal_len >> 8));
+    /* CRC 覆盖 base+1..+7 和 payload, 跳过 +8/+9 自身 */
+    for (i = 1; i <= 7; i++) c = crc16_update(c, rb((uint16_t)(PM5_WAL_BASE + i)));
+    for (i = 0; i < wal_len; i++) c = crc16_update(c, wal_buf[i]);
+    wb((uint16_t)(PM5_WAL_BASE + 8), (uint8_t)(c & 0xFF));
+    wb((uint16_t)(PM5_WAL_BASE + 9), (uint8_t)(c >> 8));
+    for (i = 0; i < wal_len; i++) wb((uint16_t)(PM5_WAL_PAYLOAD + i), wal_buf[i]);
+    wb(PM5_WAL_COMMIT, 0xA5);       /* 最后提交 */
+    sram_off();
+}
+
+/* 上电恢复: 已提交日志重放 new 段; 未提交/损坏日志直接丢弃. */
+static void wal_recover(void)
+{
+    uint8_t i, nseg;
+    uint16_t len, c = 0xFFFF;
+    uint16_t p;
+
+    sram_on();
+    if (rb(PM5_WAL_COMMIT) != 0xA5) { sram_off(); return; }
+    /* 只有 PMG5 双头存在时才重放; 防止把旧 PMG4 存档恢复后残留的 WAL 应用上去. */
+    {
+        uint16_t sa, sb;
+        if (!pm5_hdr_valid(PM5_HDR_A, &sa) && !pm5_hdr_valid(PM5_HDR_B, &sb)) {
+            wb(PM5_WAL_COMMIT, 0x00);
+            sram_off();
+            return;
+        }
+    }
+    if (rb((uint16_t)(PM5_WAL_BASE + 1)) != 'W' ||
+        rb((uint16_t)(PM5_WAL_BASE + 2)) != 'A' ||
+        rb((uint16_t)(PM5_WAL_BASE + 3)) != 'L' ||
+        rb((uint16_t)(PM5_WAL_BASE + 4)) != '5') {
+        wb(PM5_WAL_COMMIT, 0x00); sram_off(); return;
+    }
+    nseg = rb((uint16_t)(PM5_WAL_BASE + 5));
+    len = (uint16_t)((uint16_t)rb((uint16_t)(PM5_WAL_BASE + 6)) |
+                     ((uint16_t)rb((uint16_t)(PM5_WAL_BASE + 7)) << 8));
+    if (len > PM5_WAL_MAX || nseg == 0 || nseg > 8) {
+        wb(PM5_WAL_COMMIT, 0x00); sram_off(); return;
+    }
+    for (i = 1; i <= 7; i++) c = crc16_update(c, rb((uint16_t)(PM5_WAL_BASE + i)));
+    for (i = 0; i < len; i++) {
+        wal_buf[i] = rb((uint16_t)(PM5_WAL_PAYLOAD + i));
+        c = crc16_update(c, wal_buf[i]);
+    }
+    if (c != rd16((uint16_t)(PM5_WAL_BASE + 8))) {
+        wb(PM5_WAL_COMMIT, 0x00); sram_off(); return;
+    }
+
+    p = 0;
+    for (i = 0; i < nseg; i++) {
+        uint16_t a;
+        uint8_t n, j;
+        if ((uint16_t)(p + 3) > len) break;
+        a = (uint16_t)((uint16_t)wal_buf[p] | ((uint16_t)wal_buf[p + 1] << 8));
+        n = wal_buf[p + 2];
+        p = (uint16_t)(p + 3);
+        if ((uint16_t)(p + (uint16_t)n * 2u) > len) break;
+        p = (uint16_t)(p + n);       /* 跳过 old */
+        for (j = 0; j < n; j++) wb((uint16_t)(a + j), wal_buf[p + j]);
+        p = (uint16_t)(p + n);
+    }
+    wb(PM5_WAL_COMMIT, 0x00);       /* 幂等重放完成 */
+    sram_off();
+}
+
+/* ------------------------------------------------------------------ */
+/* 低区 PMG4 头 / 兼容层                                                */
+/* ------------------------------------------------------------------ */
+
 static uint8_t chk_calc(void)
 {
     uint8_t c = 0xA5;
     uint8_t b;
     uint16_t i, a = 0;
 
-    /* 按 8KB 存储体直接扫描: 避免每个字节一次函数调用/切体判断 */
     for (b = 0; b < 3; b++) {
         bank_set(b);
         for (i = 0; i < 8192; i++, a++) {
@@ -264,7 +557,7 @@ static uint8_t magic_is(const uint8_t *m)
     return 1;
 }
 
-/* 写入头部 (MAGIC/PIN/TRIES/FLAGS/设置) 并重算全局校验和 */
+/* 写低区 PMG4 兼容头 + 高区 PMG5 双头. 低区校验和保持有效, 方便旧版只读. */
 static void header_save(void)
 {
     uint8_t i;
@@ -272,7 +565,7 @@ static void header_save(void)
     for (i = 0; i < 4; i++) wb(OFS_MAGIC + i, MAGIC[i]);
     for (i = 0; i < PIN_LEN; i++) wb(OFS_PIN + i, pin_obf[i]);
     wb(OFS_TRIES, tries);
-    wb(OFS_FLAGS, pin_set ? FLAG_PINSET : 0x00);
+    wb(OFS_FLAGS, (uint8_t)((pin_set ? FLAG_PINSET : 0x00) | (pm5_active ? FLAG_PM5 : 0x00)));
     wb(OFS_GEN, (uint8_t)(gen_idx | (gen_sym ? 0x04 : 0x00) | SET_VALID));
     wb(OFS_LOCK, lock_idx);
     wb(OFS_LIST, list_user ? 1 : 0);
@@ -280,9 +573,10 @@ static void header_save(void)
     wb(OFS_CHK, vault_chk);
     chk_valid = 1;
     sram_off();
+    if (pm5_active) pm5_hdr_save();
 }
 
-/* 记录改动提交: 校验和已在写入时增量维护, 这里只写回 */
+/* 记录改动提交: 低区 PMG4 兼容校验和已在写入时增量维护. */
 static void vault_commit(void)
 {
     sram_on();
@@ -290,55 +584,118 @@ static void vault_commit(void)
     sram_off();
 }
 
-/* 单个头部字节增量更新 (设置/列表模式等) */
-static void header_patch(uint8_t a, uint8_t v)
+static void settings_save(void)
 {
-    uint8_t old;
+    header_save();
+}
+
+/* 读取低区 PMG4 字段; 调用者已 sram_on. */
+static void pmg4_fields_load(void)
+{
+    uint8_t i, g;
+    for (i = 0; i < PIN_LEN; i++) pin_obf[i] = rb(OFS_PIN + i);
+    tries = rb(OFS_TRIES);
+    if (tries > 3) tries = 3;
+    pin_set = (rb(OFS_FLAGS) & FLAG_PINSET) ? 1 : 0;
+    g = rb(OFS_GEN);
+    if (g & SET_VALID) {
+        gen_idx = (uint8_t)(g & 3);
+        if (gen_idx > 3) gen_idx = 1;
+        gen_sym = (g & 0x04) ? 1 : 0;
+        lock_idx = rb(OFS_LOCK);
+        if (lock_idx > 4) lock_idx = 2;
+        list_user = (uint8_t)(rb(OFS_LIST) & 1);
+    } else {
+        gen_idx = 1; gen_sym = 1; lock_idx = 2; list_user = 0;
+    }
+}
+
+/* 低区 PMG4 头是否与高区 PMG5 头一致; 调用者已 sram_on. */
+static uint8_t pm5_low_matches(void)
+{
+    uint8_t i;
+    if (!magic_is(MAGIC)) return 0;
+    if (rb(OFS_CHK) != chk_calc()) return 0;
+    for (i = 0; i < PIN_LEN; i++)
+        if (rb((uint16_t)(OFS_PIN + i)) != pin_obf[i]) return 0;
+    if (rb(OFS_TRIES) != tries) return 0;
+    if ((rb(OFS_FLAGS) & FLAG_PINSET) != (pin_set ? FLAG_PINSET : 0)) return 0;
+    if (rb(OFS_GEN) != (uint8_t)(gen_idx | (gen_sym ? 0x04 : 0x00) | SET_VALID)) return 0;
+    if (rb(OFS_LOCK) != lock_idx) return 0;
+    if (rb(OFS_LIST) != (uint8_t)(list_user ? 1 : 0)) return 0;
+    return 1;
+}
+
+/* 只在启动/迁移后扫描一次, 避免列表每次绘制记录都算 CRC. */
+static void pm5_scan_crc(void)
+{
+    uint16_t i;
+    uint16_t c;
+    memset(bad_slots, 0, sizeof(bad_slots));
+    memset(bad_bin, 0, sizeof(bad_bin));
+    vault_bad_count = 0;
+    if (!pm5_active) return;
     sram_on();
-    old = rb(a);
-    if (old != v) {
-        vault_chk ^= (uint8_t)(old ^ v);
-        wb(a, v);
+    for (i = 0; i < N_SLOTS; i++) {
+        if (rb(REC_ADDR(i)) != USED_MAGIC) continue;
+        c = crc16_sram(REC_ADDR(i), REC_SZ);
+        if (c != rd16((uint16_t)(PM5_REC_CRC + i * 2u))) {
+            bad_slots[i >> 3] |= (uint8_t)(1u << (i & 7));
+            vault_bad_count++;
+        }
+    }
+    for (i = 0; i < BIN_SLOTS; i++) {
+        if (rb((uint16_t)(BIN_DATA + i * REC_SZ)) != USED_MAGIC) continue;
+        c = crc16_sram((uint16_t)(BIN_DATA + i * REC_SZ), REC_SZ);
+        if (c != rd16(bin_crc_addr((uint8_t)i))) {
+            bad_bin[i >> 3] |= (uint8_t)(1u << (i & 7));
+            vault_bad_count++;
+        }
     }
     sram_off();
 }
 
-static void settings_save(void)
-{
-    if (!chk_valid) { header_save(); return; }
-    header_patch(OFS_GEN, (uint8_t)(gen_idx | (gen_sym ? 0x04 : 0x00) | SET_VALID));
-    header_patch(OFS_LOCK, lock_idx);
-    header_patch(OFS_LIST, list_user ? 1 : 0);
-    vault_commit();
-}
-
 /* 读入头部.
- * 返回 LOAD_EMPTY / LOAD_OK / LOAD_LEGACY / LOAD_CORRUPT / LOAD_UNSUPPORTED.
- * 只有真正空白的 SRAM 才算 LOAD_EMPTY; 有 MAGIC 但校验失败绝不能当空档. */
+ * 返回 LOAD_EMPTY / LOAD_OK / LOAD_LEGACY / LOAD_PM4 / LOAD_CORRUPT / LOAD_UNSUPPORTED.
+ * PMG5 双头有效时优先使用高区; 否则低区 PMG4 有效时返回 LOAD_PM4 走自动迁移.
+ * 有 MAGIC 但校验失败绝不能当空档. */
 static uint8_t vault_load(void)
 {
-    uint8_t i, g, unknown = 0;
+    uint8_t i, unknown = 0;
+
+    if (pm5_hdr_load()) {
+        sram_on();
+        if (magic_is(MAGIC) && rb(OFS_CHK) == chk_calc()) {
+            if (pm5_low_matches()) {
+                vault_chk = rb(OFS_CHK);
+                chk_valid = 1;
+                sram_off();
+                pm5_scan_crc();
+                return (uint8_t)((vault_bad_count && !damage_ack) ? LOAD_DAMAGED : LOAD_OK);
+            }
+            /* 低区被旧版/外部修改: 以低区为准, 重新迁移并重建高区. */
+            pmg4_fields_load();
+            pm5_active = 0;
+            vault_chk = rb(OFS_CHK);
+            chk_valid = 1;
+            sram_off();
+            return LOAD_PM4;
+        }
+        chk_valid = 0;
+        sram_off();
+        pm5_scan_crc();
+        return (uint8_t)((vault_bad_count && !damage_ack) ? LOAD_DAMAGED : LOAD_OK);
+    }
 
     sram_on();
     if (magic_is(MAGIC)) {
         if (rb(OFS_CHK) == chk_calc()) {
-            for (i = 0; i < PIN_LEN; i++) pin_obf[i] = rb(OFS_PIN + i);
-            tries = rb(OFS_TRIES);
-            if (tries > 3) tries = 3;
-            pin_set = (rb(OFS_FLAGS) & FLAG_PINSET) ? 1 : 0;
-            g = rb(OFS_GEN);
-            if (g & SET_VALID) {
-                gen_idx = (uint8_t)(g & 3);
-                if (gen_idx > 3) gen_idx = 1;
-                gen_sym = (g & 0x04) ? 1 : 0;
-                lock_idx = rb(OFS_LOCK);
-                if (lock_idx > 4) lock_idx = 2;
-                list_user = (uint8_t)(rb(OFS_LIST) & 1);
-            }
+            pm5_active = 0;
+            pmg4_fields_load();
             vault_chk = rb(OFS_CHK);
             chk_valid = 1;
             sram_off();
-            return LOAD_OK;
+            return LOAD_PM4;
         }
         sram_off();
         return LOAD_CORRUPT;
@@ -363,6 +720,7 @@ static uint8_t vault_load(void)
     }
     sram_off();
 
+    pm5_active = 0;
     pin_set = 0;
     tries = 0;
     chk_valid = 0;
@@ -371,7 +729,7 @@ static uint8_t vault_load(void)
     return unknown ? LOAD_UNSUPPORTED : LOAD_EMPTY;
 }
 
-/* 槽位区整体清零 (清库/首次设置; 不碰头部; 同时清回收站/迁移暂存) */
+/* 槽位区整体清零 (清库/首次设置; 不碰低区头部; 同时清回收站/日志/高区) */
 static void vault_clear_slots(void)
 {
     sram_on();
@@ -397,7 +755,10 @@ static void vault_wipe(void)
     pin_set = 0;
     tries = 0;
     gen_idx = 1; gen_sym = 1; lock_idx = 2; list_user = 0;
+    pm5_active = 1;
+    damage_ack = 0;
     vault_clear_slots();
+    pm5_build_tables();
     header_save();
 }
 
@@ -419,68 +780,130 @@ static uint8_t slot_used(uint16_t i)
     sram_on();
     u = (uint8_t)(rb(REC_ADDR(i)) == USED_MAGIC);
     sram_off();
+    if (u && pm5_active && (bad_slots[i >> 3] & (uint8_t)(1u << (i & 7)))) u = 0;
+    return u;
+}
+
+static uint8_t slot_raw_used(uint16_t i)
+{
+    uint8_t u;
+    sram_on();
+    u = (uint8_t)(rb(REC_ADDR(i)) == USED_MAGIC);
+    sram_off();
     return u;
 }
 
 /* 在当前布局的任意平面地址读/写一条记录 (迁移暂存区也用它) */
+static void rec_read_raw(uint16_t a, uint8_t *b)
+{
+    uint8_t j;
+    sram_on();
+    for (j = 0; j < REC_SZ; j++) b[j] = rb((uint16_t)(a + j));
+    sram_off();
+}
+
+static void rec_write_raw(uint16_t a, const uint8_t *b)
+{
+    uint8_t j;
+    sram_on();
+    for (j = 0; j < REC_SZ; j++) wb((uint16_t)(a + j), b[j]);
+    sram_off();
+}
+
+static void rec_pack(const slot_t *s, uint8_t *b)
+{
+    uint8_t j;
+    memset(b, 0, REC_SZ);
+    b[REC_OFS_USED] = s->used ? USED_MAGIC : 0x00;
+    b[REC_OFS_LLEN] = s->llen;
+    for (j = 0; j < LBL_MAX; j++) b[REC_OFS_LABEL + j] = (uint8_t)s->label[j];
+    b[REC_OFS_ULEN] = s->ulen;
+    for (j = 0; j < USR_MAX; j++) b[REC_OFS_USER + j] = (uint8_t)s->user[j];
+    b[REC_OFS_PLEN] = s->plen;
+    for (j = 0; j < PSS_MAX; j++) b[REC_OFS_PASS + j] = (uint8_t)s->pass[j];
+}
+
 static void rec_read_at(uint16_t a, slot_t *s)
 {
     uint8_t j;
+    uint8_t b[REC_SZ];
 
     memset(s, 0, sizeof(slot_t));
-    sram_on();
-    if (rb(a) != USED_MAGIC) { sram_off(); return; }
+    rec_read_raw(a, b);
+    if (b[REC_OFS_USED] != USED_MAGIC) return;
     s->used = 1;
-    s->llen = rb((uint16_t)(a + REC_OFS_LLEN));
+    s->llen = b[REC_OFS_LLEN];
     if (s->llen > LBL_MAX) s->llen = LBL_MAX;
-    for (j = 0; j < LBL_MAX; j++) s->label[j] = (char)rb((uint16_t)(a + REC_OFS_LABEL + j));
+    for (j = 0; j < LBL_MAX; j++) s->label[j] = (char)b[REC_OFS_LABEL + j];
     s->label[LBL_MAX] = 0;
-    s->ulen = rb((uint16_t)(a + REC_OFS_ULEN));
+    s->ulen = b[REC_OFS_ULEN];
     if (s->ulen > USR_MAX) s->ulen = USR_MAX;
-    for (j = 0; j < USR_MAX; j++) s->user[j] = (char)rb((uint16_t)(a + REC_OFS_USER + j));
+    for (j = 0; j < USR_MAX; j++) s->user[j] = (char)b[REC_OFS_USER + j];
     s->user[USR_MAX] = 0;
-    s->plen = rb((uint16_t)(a + REC_OFS_PLEN));
+    s->plen = b[REC_OFS_PLEN];
     if (s->plen > PSS_MAX) s->plen = PSS_MAX;
-    for (j = 0; j < PSS_MAX; j++) s->pass[j] = (char)rb((uint16_t)(a + REC_OFS_PASS + j));
+    for (j = 0; j < PSS_MAX; j++) s->pass[j] = (char)b[REC_OFS_PASS + j];
     s->pass[PSS_MAX] = 0;
-    sram_off();
 }
 
 static void rec_write_at(uint16_t a, const slot_t *s)
 {
-    uint8_t j;
-
-    sram_on();
-    wb(a, s->used ? USED_MAGIC : 0x00);
-    wb((uint16_t)(a + REC_OFS_LLEN), s->llen);
-    for (j = 0; j < LBL_MAX; j++) wb((uint16_t)(a + REC_OFS_LABEL + j), (uint8_t)s->label[j]);
-    wb((uint16_t)(a + REC_OFS_ULEN), s->ulen);
-    for (j = 0; j < USR_MAX; j++) wb((uint16_t)(a + REC_OFS_USER + j), (uint8_t)s->user[j]);
-    wb((uint16_t)(a + REC_OFS_PLEN), s->plen);
-    for (j = 0; j < PSS_MAX; j++) wb((uint16_t)(a + REC_OFS_PASS + j), (uint8_t)s->pass[j]);
-    sram_off();
+    uint8_t b[REC_SZ];
+    rec_pack(s, b);
+    rec_write_raw(a, b);
 }
 
-static void slot_read(uint16_t i, slot_t *s)  { rec_read_at(REC_ADDR(i), s); }
+static void slot_read(uint16_t i, slot_t *s)
+{
+    rec_read_at(REC_ADDR(i), s);
+    if (s->used && pm5_active && (bad_slots[i >> 3] & (uint8_t)(1u << (i & 7))))
+        memset(s, 0, sizeof(slot_t));
+}
 
-/* 写一条正式槽位记录: 用 XOR 差分增量维护全局校验和, 不再扫 20KB */
+/* 写一条正式槽位记录: WAL 保护 记录 + CRC 表项 + 低区 XOR 校验和. */
 static void slot_write(uint16_t i, const slot_t *s)
 {
     uint16_t a = REC_ADDR(i);
-    uint8_t j, x = 0;
+    uint16_t ca = (uint16_t)(PM5_REC_CRC + (uint16_t)i * 2u);
+    uint8_t oldrec[REC_SZ], newrec[REC_SZ];
+    uint8_t oldc[2], newc[2], oldchk, newchk, j, x = 0;
+    uint16_t nc;
 
-    if (chk_valid) {
-        sram_on();
-        for (j = 0; j < REC_SZ; j++) x ^= rb((uint16_t)(a + j));
-        sram_off();
+    rec_read_raw(a, oldrec);
+    rec_pack(s, newrec);
+    sram_on();
+    oldc[0] = rb(ca); oldc[1] = rb((uint16_t)(ca + 1));
+    oldchk = chk_valid ? vault_chk : 0;
+    sram_off();
+
+    for (j = 0; j < REC_SZ; j++) x ^= (uint8_t)(oldrec[j] ^ newrec[j]);
+    if (chk_valid) newchk = (uint8_t)(oldchk ^ x);
+    else           newchk = oldchk;
+
+    nc = crc16_buf(newrec, REC_SZ);
+    newc[0] = (uint8_t)(nc & 0xFF); newc[1] = (uint8_t)(nc >> 8);
+
+    wal_reset();
+    wal_add(a, REC_SZ, oldrec, newrec);
+    wal_add(ca, 2, oldc, newc);
+    if (chk_valid) wal_add(OFS_CHK, 1, &oldchk, &newchk);
+    wal_commit();
+
+    rec_write_raw(a, newrec);
+    sram_on();
+    wb(ca, newc[0]); wb((uint16_t)(ca + 1), newc[1]);
+    if (chk_valid) wb(OFS_CHK, newchk);
+    sram_off();
+    vault_chk = newchk;
+    if (!chk_valid) {
+        sram_on(); vault_chk = chk_calc(); wb(OFS_CHK, vault_chk); sram_off();
+        chk_valid = 1;
     }
-    rec_write_at(a, s);
-    if (chk_valid) {
-        sram_on();
-        for (j = 0; j < REC_SZ; j++) x ^= rb((uint16_t)(a + j));
-        sram_off();
-        vault_chk ^= x;
+    if (pm5_active && (bad_slots[i >> 3] & (uint8_t)(1u << (i & 7)))) {
+        bad_slots[i >> 3] &= (uint8_t)~(1u << (i & 7));
+        if (vault_bad_count) vault_bad_count--;
     }
+    wal_clear();
 }
 
 /* v0.3 旧记录 (标签 8 / 密码 36, 无用户名) */
@@ -504,23 +927,46 @@ static void legacy_slot_read(uint16_t i, slot_t *s)
     sram_off();
 }
 
-/* 整条记录清零 (删除; 不留旧密码残迹) */
+/* 整条记录清零 (删除; 不留旧密码残迹), WAL 保护记录+CRC+低区校验和. */
 static void slot_clear(uint16_t i)
 {
     uint16_t a = REC_ADDR(i);
-    uint8_t j, x = 0;
+    uint16_t ca = (uint16_t)(PM5_REC_CRC + (uint16_t)i * 2u);
+    uint8_t oldrec[REC_SZ], newrec[REC_SZ];
+    uint8_t oldc[2], newc[2], oldchk, newchk, j, x = 0;
 
+    rec_read_raw(a, oldrec);
+    memset(newrec, 0, REC_SZ);
     sram_on();
-    for (j = 0; j < REC_SZ; j++) {
-        x ^= rb((uint16_t)(a + j));
-        wb((uint16_t)(a + j), 0x00);
-    }
+    oldc[0] = rb(ca); oldc[1] = rb((uint16_t)(ca + 1));
+    oldchk = chk_valid ? vault_chk : 0;
     sram_off();
-    if (chk_valid) vault_chk ^= x;
+    for (j = 0; j < REC_SZ; j++) x ^= oldrec[j];
+    if (chk_valid) newchk = (uint8_t)(oldchk ^ x);
+    else           newchk = oldchk;
+    newc[0] = 0; newc[1] = 0;
+
+    wal_reset();
+    wal_add(a, REC_SZ, oldrec, newrec);
+    wal_add(ca, 2, oldc, newc);
+    if (chk_valid) wal_add(OFS_CHK, 1, &oldchk, &newchk);
+    wal_commit();
+
+    rec_write_raw(a, newrec);
+    sram_on();
+    wb(ca, 0); wb((uint16_t)(ca + 1), 0);
+    if (chk_valid) wb(OFS_CHK, newchk);
+    sram_off();
+    vault_chk = newchk;
+    if (pm5_active && (bad_slots[i >> 3] & (uint8_t)(1u << (i & 7)))) {
+        bad_slots[i >> 3] &= (uint8_t)~(1u << (i & 7));
+        if (vault_bad_count) vault_bad_count--;
+    }
+    wal_clear();
 }
 
 /* ------------------------------------------------------------------ */
-/* 最近删除回收站 (16 条, 位于槽位区之后的空闲 SRAM)                   */
+/* 最近删除回收站 (16 条, 槽位区之后)                                   */
 /* ------------------------------------------------------------------ */
 
 static uint8_t bin_magic_ok(void)
@@ -529,7 +975,7 @@ static uint8_t bin_magic_ok(void)
                      rb(BIN_BASE + 2) == 'N' && rb(BIN_BASE + 3) == '1');
 }
 
-/* 回收站校验和: 头部 head + 16 条记录 (不含 CHK 自身) */
+/* 回收站低区 XOR 校验和 (兼容 PMG4) */
 static uint8_t bin_chk_calc(void)
 {
     uint8_t c = (uint8_t)(0xA5 ^ bin_head);
@@ -538,23 +984,40 @@ static uint8_t bin_chk_calc(void)
     return c;
 }
 
+static uint16_t bin_crc_addr(uint8_t i)
+{
+    return (uint16_t)(PM5_BIN_CRC + (uint16_t)i * 2u);
+}
+
+static uint8_t bin_crc_ok(uint8_t i)
+{
+    uint8_t ok;
+    sram_on();
+    ok = (uint8_t)(rd16(bin_crc_addr(i)) ==
+                   crc16_sram((uint16_t)(BIN_DATA + (uint16_t)i * REC_SZ), REC_SZ));
+    sram_off();
+    return ok;
+}
+
 static void bin_reset(void)
 {
     uint16_t i;
     sram_on();
     for (i = 0; i < BIN_BYTES; i++) wb((uint16_t)(BIN_DATA + i), 0x00);
+    for (i = 0; i < BIN_SLOTS * 2u; i++) wb((uint16_t)(PM5_BIN_CRC + i), 0x00);
     bin_head = 0;
     wb(BIN_BASE, 'B'); wb(BIN_BASE + 1, 'I');
     wb(BIN_BASE + 2, 'N'); wb(BIN_BASE + 3, '1');
     wb(BIN_BASE + 4, bin_head);
     wb(BIN_BASE + 5, bin_chk_calc());
     sram_off();
+    memset(bad_bin, 0, sizeof(bad_bin));
     bin_ready = 1;
 }
 
 static void bin_load(void)
 {
-    uint8_t ok;
+    uint8_t ok, i;
 
     sram_on();
     ok = bin_magic_ok();
@@ -564,37 +1027,141 @@ static void bin_load(void)
         else if (rb(BIN_BASE + 5) != bin_chk_calc()) ok = 0;
     }
     sram_off();
+    if (ok) {
+        for (i = 0; i < BIN_SLOTS; i++) {
+            sram_on();
+            if (rb((uint16_t)(BIN_DATA + (uint16_t)i * REC_SZ)) == USED_MAGIC &&
+                !bin_crc_ok(i)) ok = 0;
+            sram_off();
+            if (!ok) break;
+        }
+    }
 
     if (ok) bin_ready = 1;
     else    bin_reset();
 }
 
-static void bin_save(void)
-{
-    sram_on();
-    wb(BIN_BASE, 'B'); wb(BIN_BASE + 1, 'I');
-    wb(BIN_BASE + 2, 'N'); wb(BIN_BASE + 3, '1');
-    wb(BIN_BASE + 4, bin_head);
-    wb(BIN_BASE + 5, bin_chk_calc());
-    sram_off();
-}
-
 static void bin_push(const slot_t *s)
 {
+    uint16_t a;
+    uint8_t oldrec[REC_SZ], newrec[REC_SZ];
+    uint8_t oldhead, newhead, oldck, newck;
+    uint8_t oldc[2], newc[2];
+    uint16_t nc;
+    uint8_t j;
+
     if (!bin_ready) bin_load();
-    rec_write_at((uint16_t)(BIN_DATA + (uint16_t)bin_head * REC_SZ), s);
-    bin_head = (uint8_t)((bin_head + 1) & (BIN_SLOTS - 1));
-    bin_save();
+    a = (uint16_t)(BIN_DATA + (uint16_t)bin_head * REC_SZ);
+    rec_read_raw(a, oldrec);
+    rec_pack(s, newrec);
+    oldhead = bin_head;
+    newhead = (uint8_t)((bin_head + 1) & (BIN_SLOTS - 1));
+
+    sram_on();
+    oldck = rb(BIN_BASE + 5);
+    oldc[0] = rb(bin_crc_addr(bin_head));
+    oldc[1] = rb((uint16_t)(bin_crc_addr(bin_head) + 1));
+    sram_off();
+    newck = (uint8_t)(oldck ^ oldhead ^ newhead);
+    for (j = 0; j < REC_SZ; j++) newck ^= (uint8_t)(oldrec[j] ^ newrec[j]);
+    nc = crc16_buf(newrec, REC_SZ);
+    newc[0] = (uint8_t)(nc & 0xFF); newc[1] = (uint8_t)(nc >> 8);
+
+    wal_reset();
+    wal_add(a, REC_SZ, oldrec, newrec);
+    wal_add(BIN_BASE + 4, 1, &oldhead, &newhead);
+    wal_add(BIN_BASE + 5, 1, &oldck, &newck);
+    wal_add(bin_crc_addr(bin_head), 2, oldc, newc);
+    wal_commit();
+
+    rec_write_raw(a, newrec);
+    sram_on();
+    wb(BIN_BASE + 4, newhead);
+    wb(BIN_BASE + 5, newck);
+    wb(bin_crc_addr(bin_head), newc[0]);
+    wb((uint16_t)(bin_crc_addr(bin_head) + 1), newc[1]);
+    sram_off();
+    bin_head = newhead;
+    wal_clear();
 }
 
 static void bin_remove(uint8_t b)
 {
     uint16_t a = (uint16_t)(BIN_DATA + (uint16_t)b * REC_SZ);
+    uint8_t oldrec[REC_SZ], newrec[REC_SZ];
+    uint8_t oldck, newck, oldc[2], newc[2];
     uint8_t j;
+
+    rec_read_raw(a, oldrec);
+    memset(newrec, 0, REC_SZ);
     sram_on();
-    for (j = 0; j < REC_SZ; j++) wb((uint16_t)(a + j), 0x00);
+    oldck = rb(BIN_BASE + 5);
+    oldc[0] = rb(bin_crc_addr(b));
+    oldc[1] = rb((uint16_t)(bin_crc_addr(b) + 1));
     sram_off();
-    bin_save();
+    newck = oldck;
+    for (j = 0; j < REC_SZ; j++) newck ^= oldrec[j];
+    newc[0] = 0; newc[1] = 0;
+
+    wal_reset();
+    wal_add(a, REC_SZ, oldrec, newrec);
+    wal_add(BIN_BASE + 5, 1, &oldck, &newck);
+    wal_add(bin_crc_addr(b), 2, oldc, newc);
+    wal_commit();
+
+    rec_write_raw(a, newrec);
+    sram_on();
+    wb(BIN_BASE + 5, newck);
+    wb(bin_crc_addr(b), 0);
+    wb((uint16_t)(bin_crc_addr(b) + 1), 0);
+    sram_off();
+    wal_clear();
+}
+
+/* 迁移/擦除后重建记录 CRC 表 + 回收站 CRC 表; 低区数据不移动. */
+static void pm5_build_tables(void)
+{
+    uint16_t i;
+    uint16_t c;
+    uint8_t ok;
+
+    memset(bad_slots, 0, sizeof(bad_slots));
+    memset(bad_bin, 0, sizeof(bad_bin));
+    vault_bad_count = 0;
+    damage_ack = 0;
+    sram_on();
+    for (i = 0; i < N_SLOTS; i++) {
+        if (rb(REC_ADDR(i)) == USED_MAGIC) {
+            c = crc16_sram(REC_ADDR(i), REC_SZ);
+            wr16((uint16_t)(PM5_REC_CRC + i * 2u), c);
+        } else {
+            wr16((uint16_t)(PM5_REC_CRC + i * 2u), 0);
+        }
+    }
+    sram_off();
+
+    sram_on();
+    ok = bin_magic_ok();
+    if (ok) {
+        bin_head = rb(BIN_BASE + 4);
+        if (bin_head >= BIN_SLOTS) ok = 0;
+        else if (rb(BIN_BASE + 5) != bin_chk_calc()) ok = 0;
+    }
+    sram_off();
+    if (ok) {
+        for (i = 0; i < BIN_SLOTS; i++) {
+            sram_on();
+            if (rb((uint16_t)(BIN_DATA + i * REC_SZ)) == USED_MAGIC) {
+                c = crc16_sram((uint16_t)(BIN_DATA + i * REC_SZ), REC_SZ);
+                wr16(bin_crc_addr((uint8_t)i), c);
+            } else {
+                wr16(bin_crc_addr((uint8_t)i), 0);
+            }
+            sram_off();
+        }
+    } else {
+        bin_reset();
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1655,6 +2222,8 @@ static uint8_t list_screen(void)
         } else if (pressed & J_A) {
             if (slot_used(list_sel)) {
                 if (detail_screen(list_sel)) return 1;
+            } else if (slot_raw_used(list_sel)) {
+                toast("SLOT DAMAGED");
             } else {
                 if (add_flow((int16_t)list_sel)) return 1;
             }
@@ -1922,29 +2491,39 @@ static uint8_t recovery_screen(uint8_t kind)
     uint8_t k;
 
     if (kind == LOAD_CORRUPT) valid = scan_used_records();
+    if (kind == LOAD_DAMAGED) valid = vault_bad_count;
 
     while (1) {
         screen_clear();
         draw_frame(0, 0, 20, 17);
         put_tile(1, 1, 255);
-        put_str(1, 2, (kind == LOAD_UNSUPPORTED)
-                        ? "UNSUPPORTED SAVE" : "SAVE CORRUPT");
-        put_str(1, 4, "DATA IS UNTOUCHED");
-        if (kind == LOAD_CORRUPT) {
+        if (kind == LOAD_DAMAGED) {
+            put_str(1, 2, "SAVE DAMAGED");
             fmt3_zp(count, valid);
-            count[3] = '/'; count[4] = '2'; count[5] = '5'; count[6] = '5'; count[7] = 0;
-            put_str(1, 6, "SCAN FINDS");
-            put_str(12, 6, count);
+            put_str(1, 4, "BAD RECORDS:");
+            put_str(13, 4, count);
+            put_str(1, 6, "OTHER DATA INTACT");
+            put_str(1, 10, "A=CONTINUE");
         } else {
-            put_str(1, 6, "UNKNOWN/OLD FORMAT");
+            put_str(1, 2, (kind == LOAD_UNSUPPORTED)
+                            ? "UNSUPPORTED SAVE" : "SAVE CORRUPT");
+            put_str(1, 4, "DATA IS UNTOUCHED");
+            if (kind == LOAD_CORRUPT) {
+                fmt3_zp(count, valid);
+                count[3] = '/'; count[4] = '2'; count[5] = '5'; count[6] = '5'; count[7] = 0;
+                put_str(1, 6, "SCAN FINDS");
+                put_str(12, 6, count);
+            } else {
+                put_str(1, 6, "UNKNOWN/OLD FORMAT");
+            }
+            put_str(1, 10, "A=RETRY");
         }
-        put_str(1, 10, "A=RETRY");
         put_str(1, 11, "START=WIPE");
         put_str(1, 14, "WIPE ERASES ALL");
         put_str(1, 15, "ONLY IF YOU ACCEPT");
 
         k = ui_getkey(J_A | J_START);
-        if (k & J_A) return 1;
+        if (k & J_A) return (uint8_t)((kind == LOAD_DAMAGED) ? 2 : 1);
 
         if (k & J_START) {
             screen_clear();
@@ -2025,7 +2604,9 @@ static void setup_pin(void)
     choose_pin();
     pin_set = 1;
     tries = 0;
+    pm5_active = 1;
     vault_clear_slots();            /* 首次设置: 清空全部槽位 */
+    pm5_build_tables();
     header_save();
     toast("PIN SAVED");
 }
@@ -2139,21 +2720,43 @@ static uint8_t migrate_v03(void)
         rec_write_at(REC_ADDR(i), &s);
     }
 
-    pin_set = 1;
-    tries = 0;
-    header_save();                  /* MAGIC4 + 新布局校验和 */
-
-    /* 清掉暂存区里的密码副本 */
+    /* 清掉暂存区里的密码副本 (其中也包含 PMG5 高区, 必须最后重建) */
     sram_on();
     for (i = 0; i < (uint16_t)(N_SLOTS * REC_SZ); i++) {
         wb((uint16_t)(MIG_TMP + i), 0x00);
     }
     sram_off();
 
+    pin_set = 1;
+    tries = 0;
+    pm5_active = 1;
+    pm5_build_tables();
+    header_save();                  /* PMG4 兼容低头 + PMG5 高头 */
+
     screen_clear();
     put_str(2, 4, "SAVE UPGRADED");
-    put_str(1, 6, "V0.3.6.1 READY");
+    put_str(1, 6, "V0.3.7 READY");
     delay(1800);
+    return 1;
+}
+
+/* PMG4 -> PMG5: 只增加 CRC 表/双头, 不移动槽位, 断电可重复执行. */
+static uint8_t migrate_v04(void)
+{
+    screen_clear();
+    put_str(1, 2, "PMG4 SAVE FOUND");
+    put_str(1, 4, "UPGRADING SAVE");
+    put_str(1, 6, "DO NOT POWER OFF");
+    put_str(1, 8, "PLEASE WAIT...");
+
+    pm5_build_tables();
+    pm5_active = 1;
+    header_save();
+
+    screen_clear();
+    put_str(2, 4, "SAVE UPGRADED");
+    put_str(1, 6, "V0.3.7 READY");
+    delay(1200);
     return 1;
 }
 
@@ -2231,7 +2834,15 @@ static uint8_t menu_screen(void)
                 put_str(3, y, items[i]);
             }
         }
-        put_str(1, 16, "HOLD B=QUICK LOCK");
+        if (vault_bad_count) {
+            char bad[4];
+            fmt3_zp(bad, vault_bad_count);
+            put_str(1, 16, "BAD ");
+            put_str(5, 16, bad);
+            put_str(9, 16, "RECORDS");
+        } else {
+            put_str(1, 16, "HOLD B=QUICK LOCK");
+        }
         put_str(1, 17, "PRESS A TO OPEN");
         k = ui_getkey_noninput(J_UP | J_DOWN | J_A | J_B);
         if (!k) return 1;
@@ -2278,6 +2889,7 @@ void main(void)
     DISPLAY_ON;
 
     sram_hw_init();                          /* MBC1 RAM banking 模式 */
+    wal_recover();                           /* 先完成上次未提交/已提交的日志 */
     rng_boot();
 
     screen_clear();
@@ -2285,7 +2897,7 @@ void main(void)
     put_tile(9, 2, 254);
     put_str(4, 3, "GB PASSWORD");
     put_str(7, 5, "VAULT");
-    put_str(7, 8, "V0.3.6.1");
+    put_str(7, 8, "V0.3.7");
     put_str(4, 11, "PRESS START");
     put_str(1, 16, "BATTERY CART NEEDED");
     getkey(J_START);
@@ -2299,6 +2911,16 @@ void main(void)
                 menu_screen();          /* 刚设置过新 PIN, 直接进菜单 */
                 idle_stop();
             }
+            continue;
+        }
+
+        if (load_state == LOAD_PM4) {
+            if (!migrate_v04()) recovery_screen(LOAD_CORRUPT);
+            continue;
+        }
+
+        if (load_state == LOAD_DAMAGED) {
+            if (recovery_screen(LOAD_DAMAGED) == 2) damage_ack = 1;
             continue;
         }
 

@@ -37,11 +37,11 @@
          ^
     GB PASSWORD
        VAULT
-       V0.3.6.1
+       V0.3.7
     PRESS START
  BATTERY CART NEEDED
   ok   标题文字 GB PASSWORD
-  ok   标题版本 V0.3.6.1
+  ok   标题版本 V0.3.7
   ok   进入设置 6 位 PIN 画面
 --- 02-newpin ---
     SECRET VAULT
@@ -128,7 +128,7 @@
 --- 05c-generated-password ---
 
  PASSWORD (MAX 36)
- 9(55(8&ouywKpL_
+ TS2-Xn%MpDNwrw_
   A B C D E F G H
   I J K L M N O P
   Q R S T U V W X
@@ -153,15 +153,15 @@ Aa SYM SPACE  DEL OK
  001 EMAIL
  002 ABCDEFGHIJKLMN
  003 GENACC
- 004 EMPTY -
- 005 EMPTY -
- 006 EMPTY -
- 007 EMPTY -
- 008 EMPTY -
- 009 EMPTY -
- 010 EMPTY -
- 011 EMPTY -
- 012 EMPTY -
+ 004 EMPTY -     &$
+ 005 EMPTY -     &$
+ 006 EMPTY -     &$
+ 007 EMPTY -     &$
+ 008 EMPTY -     &$
+ 009 EMPTY -     &$
+ 010 EMPTY -     &$
+ 011 EMPTY -     &$
+ 012 EMPTY -     &$
  L/R=PAGE SEL=USER
  A=OPEN B=BACK
   ok   列表右上角显示 001/255
@@ -177,15 +177,15 @@ Aa SYM SPACE  DEL OK
  001 EMAIL
  002 ABCDEFGHIJKLMN
  003 GENACC
- 004 EMPTY -
- 005 EMPTY -
- 006 EMPTY -
- 007 EMPTY -
- 008 EMPTY -
- 009 EMPTY -
- 010 EMPTY -
- 011 EMPTY -
- 012 EMPTY -
+ 004 EMPTY -     &$
+ 005 EMPTY -     &$
+ 006 EMPTY -     &$
+ 007 EMPTY -     &$
+ 008 EMPTY -     &$
+ 009 EMPTY -     &$
+ 010 EMPTY -     &$
+ 011 EMPTY -     &$
+ 012 EMPTY -     &$
  L/R=PAGE SEL=USER
  A=OPEN B=BACK
   ok   进入详情页 (SLOT 001/255)
@@ -234,6 +234,7 @@ Aa SYM SPACE  DEL OK
   ok   编辑后用户名 = BOBX
   ok   编辑后密码保持 ABC
   ok   编辑后 SRAM 校验和正确
+  ok   编辑后记录 CRC16 已更新
   ok   单独按 START 弹出删除确认 (组合键不影响)
   ok   取消删除后记录仍在
   ok   详情页返回列表
@@ -249,6 +250,45 @@ Aa SYM SPACE  DEL OK
    CLR    0    OK
   B=DEL  START=OK
 已保存 SRAM 快照 save1.bin (32768 字节)
+
+== 流程 P0: PMG5 双头 / CRC16 / WAL / 损坏隔离 ==
+  ok   双头 A/B 均为有效 PMG5 头 (CRC16)
+  ok   双头序列号一致
+  ok   槽位 1 CRC16 与记录一致
+  ok   槽位 2 CRC16 与记录一致
+  ok   正常保存后 WAL 已清空
+  ok   低区 PMG4 兼容头已标记 PMG5
+  ok   A 头损坏后仍由 B 头启动并解锁
+  ok   A 头保持损坏 (未静默改写)
+  ok   B 头保持有效
+  ok   WAL 重放后可正常解锁
+  ok   WAL 重放恢复记录 new 值
+  ok   WAL 重放恢复记录 CRC
+  ok   WAL 重放恢复低区全局校验和
+  ok   WAL 重放后已清空
+  ok   未提交 WAL 后仍可继续
+  ok   未提交 WAL 的 new 值未被应用
+  ok   未提交 WAL 保持未提交
+  ok   损坏提示显示 BAD RECORDS
+  ok   损坏提示说明其他数据仍可用
+  ok   损坏提示 CONTINUE 后仍可解锁
+  ok   主菜单显示损坏记录警告
+--- 00b-damaged-menu ---
+
+     VAULT MENU
+ X VIEW ACCOUNTS
+ Y ADD ACCOUNT
+ Z CHANGE PIN
+ [ LOCK VAULT
+ \ RECYCLE BIN
+ ] SETTINGS
+ BAD 001 RECORDS
+ PRESS A TO OPEN
+  ok   PMG4 自动迁移后可解锁
+  ok   PMG4 迁移后双头有效
+  ok   PMG4 迁移后槽位 CRC 已建立
+  ok   PMG4 迁移后槽位数据不变
+  ok   PMG4 迁移后低区标记 PMG5
 
 == 流程 B: 错误 PIN 三次 -> SYSTEM LOCKED -> 擦除恢复 ==
   ok   重载存档后进入解锁画面
@@ -314,15 +354,15 @@ Aa SYM SPACE  DEL OK
  001 EMAIL
  002 ABCDEFGHIJKLMN
  003 GENACC
- 004 EMPTY -
- 005 EMPTY -
- 006 EMPTY -
- 007 EMPTY -
- 008 EMPTY -
- 009 EMPTY -
- 010 EMPTY -
- 011 EMPTY -
- 012 EMPTY -
+ 004 EMPTY -     &$
+ 005 EMPTY -     &$
+ 006 EMPTY -     &$
+ 007 EMPTY -     &$
+ 008 EMPTY -     &$
+ 009 EMPTY -     &$
+ 010 EMPTY -     &$
+ 011 EMPTY -     &$
+ 012 EMPTY -     &$
  L/R=PAGE SEL=USER
  A=OPEN B=BACK
   ok   断电重开后账号 EMAIL 仍在
@@ -397,18 +437,18 @@ Aa SYM SPACE  DEL OK
 --- 17-list-window-bottom ---
  ACCOUNTS    255/255
          HOLD B=LOCK
- 244 EMPTY -
- 245 EMPTY -
- 246 EMPTY -
- 247 EMPTY -
- 248 EMPTY -
- 249 EMPTY -
- 250 EMPTY -
- 251 EMPTY -
- 252 EMPTY -
- 253 EMPTY -
- 254 EMPTY -
- 255 EMPTY -
+ 244 EMPTY -     &$
+ 245 EMPTY -     &$
+ 246 EMPTY -     &$
+ 247 EMPTY -     &$
+ 248 EMPTY -     &$
+ 249 EMPTY -     &$
+ 250 EMPTY -     &$
+ 251 EMPTY -     &$
+ 252 EMPTY -     &$
+ 253 EMPTY -     &$
+ 254 EMPTY -     &$
+ 255 EMPTY -     &$
  L/R=PAGE SEL=USER
  A=OPEN B=BACK
   ok   底部再右跳保持 255/255
@@ -439,6 +479,7 @@ Aa SYM SPACE  DEL OK
   ok   删除后 255 号槽恢复 EMPTY
   ok   删除后 255 号槽 used = 0
   ok   删除后 SRAM 校验和正确
+  ok   删除后 255 号槽 CRC 表项清零
 
 == 流程 E: v0.3 (PMG3) 存档迁移 -> 新 PIN -> 数据保留 ==
   ok   迁移样本为 PMG3 旧档
@@ -478,26 +519,28 @@ Aa SYM SPACE  DEL OK
   ok   迁移后错误次数 = 0
   ok   迁移后 PIN 标志 = 1
   ok   迁移后新布局校验和正确
+  ok   PMG3 迁移后 PMG5 双头有效
+  ok   PMG3 迁移后槽位 CRC 表有效
   ok   迁移后槽位 1 标签/密码保留
   ok   迁移后槽位 1 用户名留空
   ok   迁移后槽位 2 的 36 位密码逐字节保留
   ok   迁移后槽位 3 的生成密码逐字节保留
-  ok   迁移暂存区已清零 (不留密码副本)
+  ok   迁移暂存区已清零 (不留密码副本; PMG5 高区元数据除外)
 --- 21-migrated-list ---
  ACCOUNTS    001/255
          HOLD B=LOCK
  001 EMAIL
  002 MIXED
  003 GENACC
- 004 EMPTY -
- 005 EMPTY -
- 006 EMPTY -
- 007 EMPTY -
- 008 EMPTY -
- 009 EMPTY -
- 010 EMPTY -
- 011 EMPTY -
- 012 EMPTY -
+ 004 EMPTY -     &$
+ 005 EMPTY -     &$
+ 006 EMPTY -     &$
+ 007 EMPTY -     &$
+ 008 EMPTY -     &$
+ 009 EMPTY -     &$
+ 010 EMPTY -     &$
+ 011 EMPTY -     &$
+ 012 EMPTY -     &$
  L/R=PAGE SEL=USER
  A=OPEN B=BACK
   ok   迁移后列表显示旧账号
@@ -546,35 +589,35 @@ Aa SYM SPACE  DEL OK
  002 abcdefghijklmn
  003 -
  004 -
- 005 EMPTY -
- 006 EMPTY -
- 007 EMPTY -
- 008 EMPTY -
- 009 EMPTY -
- 010 EMPTY -
- 011 EMPTY -
- 012 EMPTY -
+ 005 EMPTY -     &$
+ 006 EMPTY -     &$
+ 007 EMPTY -     &$
+ 008 EMPTY -     &$
+ 009 EMPTY -     &$
+ 010 EMPTY -     &$
+ 011 EMPTY -     &$
+ 012 EMPTY -     &$
  L/R=PAGE SEL=LABEL
  A=OPEN B=BACK
   ok   列表视图模式持久化 (头部 0x0F = 1)
   ok   切换列表视图后校验和正确
-  ok   按住 DOWN 连续滚动 (从 1 到 7)
+  ok   按住 DOWN 连续滚动 (从 1 到 5)
   ok   松开后停止滚动
 --- 24-list-hold-scroll ---
- ACCOUNTS    007/255
+ ACCOUNTS    005/255
          HOLD B=LOCK
  001 BOBX
  002 abcdefghijklmn
  003 -
  004 -
- 005 EMPTY -
- 006 EMPTY -
- 007 EMPTY -
- 008 EMPTY -
- 009 EMPTY -
- 010 EMPTY -
- 011 EMPTY -
- 012 EMPTY -
+ 005 EMPTY -     &$
+ 006 EMPTY -     &$
+ 007 EMPTY -     &$
+ 008 EMPTY -     &$
+ 009 EMPTY -     &$
+ 010 EMPTY -     &$
+ 011 EMPTY -     &$
+ 012 EMPTY -     &$
  L/R=PAGE SEL=LABEL
  A=OPEN B=BACK
   ok   切回标签视图持久化 (0x0F = 0)
@@ -610,6 +653,7 @@ Aa SYM SPACE  DEL OK
   ok   回收站条目 used = 0xA5
   ok   回收站条目标签 = SHORT
   ok   回收站校验和正确
+  ok   回收站记录 CRC16 正确
   ok   删除后主库校验和仍正确
   ok   流程 F: 回收站重开解锁
 --- 26-bin ---
@@ -627,7 +671,7 @@ Aa SYM SPACE  DEL OK
   ok   v0.3.1 旧档默认生成长度 16
   ok   v0.3.1 旧档默认符号 ON
   ok   v0.3.1 旧档默认锁屏 3 分钟
-  ok   读取旧档默认值不写设置区 (保持 0)
+  ok   旧档默认值已规范化为 PMG5 设置 (16/ON/3MIN)
   ok   v0.3.1 旧档列表默认标签视图
 == 流程 G: 回收站单条永久删除 + START 清空 ==
   ok   流程 G: 解锁进入菜单
@@ -643,5 +687,5 @@ Aa SYM SPACE  DEL OK
   ok   流程 G: 回收站操作不影响主库校验和
 
 ==============================
-断言: 255 / 255 通过
+断言: 286 / 286 通过
 全部通过

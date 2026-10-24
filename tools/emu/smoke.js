@@ -1,18 +1,18 @@
 #!/usr/bin/env node
 /*
- * smoke.js - GB Password Vault v0.3.1 无头冒烟测试 (serverboy)
+ * smoke.js - GB Password Vault v0.3.7 无头冒烟测试 (serverboy)
  *
  * 通过模拟器按键驱动完整流程, 断言:
  *   - 屏幕文本 (读 serverboy 的 DMG tilemap buffer, 等于画面实际内容)
- *   - SRAM 字节 (等于电池存档内容), 含全局校验和 (PMG4, 跨 3 个 8KB 存储体)
- *   - v0.3 (PMG3) 存档的一次性迁移
+ *   - SRAM 字节 (等于电池存档内容): PMG4 低区 XOR + PMG5 双头/CRC/WAL
+ *   - v0.3 (PMG3) / PMG4 迁移、双头、WAL 重放与损坏隔离
  *
  * 关键点 1: ROM 在绘制/延时期间不读按键, 固定帧间隔会丢键。
  *           -> 每个按键都等待画面确认 (字段/高亮格/目标文本) 后才继续, 失败自动重试。
  * 关键点 2: serverboy 每帧结束强制松键, "按住 N 帧"对 waitpad 型界面等于按 N 次。
  *           -> tap = 单帧点按 (一次输入); hold = 连续帧按住 (仅 joypad 轮询界面用)。
  * 关键点 3: 存档为 32KB (MBC1 4 x 8KB 存储体), 平面地址 = 体号 * 8192 + 体内偏移。
- *           v0.3.1 记录: 16 + i*80, 头 16B, 总 20416B。
+ *           v0.3.7 低区仍 16 + i*80；高区 0x54D0 起为 PMG5 双头/CRC/WAL。
  * 注意: serverboy 对 DMG 的 VRAM 建模: tilemap (0x9800) 在 core.BGCHRBank1
  */
 const fs = require('fs');
@@ -437,6 +437,74 @@ function buildSyntheticSave(count) {
     return s;
 }
 
+
+/* ============ PMG5 高区头 / CRC16 / WAL 工具 ============ */
+const PM5_HDR_A = 0x54D0;
+const PM5_HDR_B = 0x54F0;
+const PM5_REC_CRC = 0x5510;
+const PM5_BIN_CRC = 0x5710;
+const PM5_WAL = 0x5800;
+const PM5_WAL_MAX = 256;
+
+function crc16Update(c, b) {
+    c ^= (b << 8) & 0xFFFF;
+    for (let i = 0; i < 8; i++)
+        c = (c & 0x8000) ? (((c << 1) ^ 0x1021) & 0xFFFF) : ((c << 1) & 0xFFFF);
+    return c;
+}
+function crc16Buf(buf) {
+    let c = 0xFFFF;
+    for (const b of buf) c = crc16Update(c, b);
+    return c;
+}
+function rd16(s, a) { return (s[a] & 0xFF) | ((s[a + 1] & 0xFF) << 8); }
+function wr16(s, a, v) { s[a] = v & 0xFF; s[a + 1] = (v >> 8) & 0xFF; }
+function pm5Hdr(s, addr) {
+    const b = Buffer.isBuffer(s) ? s : Buffer.from(s);
+    if (b.toString('latin1', addr, addr + 4) !== 'PMG5') return null;
+    if (b[addr + 4] !== 1 || b[addr + 5] !== 1) return null;
+    let c = 0xFFFF;
+    for (let i = 0; i < 32; i++)
+        if (i !== 8 && i !== 9) c = crc16Update(c, b[addr + i]);
+    if (c !== rd16(b, addr + 8)) return null;
+    return { seq: rd16(b, addr + 6), crc: c };
+}
+function pm5RecCrc(s, i) { return crc16Buf(s.slice(16 + i * REC_SZ, 16 + (i + 1) * REC_SZ)); }
+function setRec(s, i, label, user, pass) {
+    const b = 16 + i * REC_SZ;
+    s.fill(0, b, b + REC_SZ);
+    s[b] = 0xA5;
+    s[b + 1] = label.length;
+    s.write(label, b + 2, 'latin1');
+    s[b + 22] = user.length;
+    s.write(user, b + 23, 'latin1');
+    s[b + 43] = pass.length;
+    s.write(pass, b + 44, 'latin1');
+}
+/* 构造已提交 WAL; segs: [{addr, old:Buffer, new:Buffer}] */
+function walBuild(s, segs) {
+    s.fill(0, PM5_WAL, PM5_WAL + 10 + PM5_WAL_MAX);
+    const parts = [];
+    for (const g of segs) {
+        const h = Buffer.alloc(3);
+        h[0] = g.addr & 0xFF; h[1] = (g.addr >> 8) & 0xFF; h[2] = g.old.length;
+        parts.push(h, g.old, g.new);
+    }
+    const payload = Buffer.concat(parts);
+    if (payload.length > PM5_WAL_MAX) throw new Error('WAL payload too large');
+    s[PM5_WAL] = 0x00;
+    s.write('WAL5', PM5_WAL + 1, 'latin1');
+    s[PM5_WAL + 5] = segs.length;
+    s[PM5_WAL + 6] = payload.length & 0xFF;
+    s[PM5_WAL + 7] = (payload.length >> 8) & 0xFF;
+    let c = 0xFFFF;
+    for (let i = 1; i <= 7; i++) c = crc16Update(c, s[PM5_WAL + i]);
+    for (const b of payload) c = crc16Update(c, b);
+    wr16(s, PM5_WAL + 8, c);
+    payload.copy(s, PM5_WAL + 10);
+    s[PM5_WAL] = 0xA5;
+}
+
 /* ================================================================== */
 
 try {
@@ -488,7 +556,7 @@ try {
     waitOk(() => screenText().includes('PRESS START'), '标题画面出现 PRESS START');
     dump('01-title');
     ok(screenText().includes('GB PASSWORD'), '标题文字 GB PASSWORD');
-    ok(screenText().includes('V0.3.6.1'), '标题版本 V0.3.6.1');
+    ok(screenText().includes('V0.3.7'), '标题版本 V0.3.7');
 
     if (!tapUntil('START', () => pinScreenReady('NEW PIN', 6), 300, 8)) throw new Error('无法进入设置 PIN 画面');
     ok(true, '进入设置 6 位 PIN 画面');
@@ -658,6 +726,7 @@ try {
     ok(r0.ulen === 4 && r0.user.startsWith('BOBX'), '编辑后用户名 = BOBX');
     ok(r0.plen === 3 && r0.pass.startsWith('ABC'), '编辑后密码保持 ABC');
     ok(checksumOk(s), '编辑后 SRAM 校验和正确');
+    ok(pm5RecCrc(s, 0) === rd16(s, PM5_REC_CRC), '编辑后记录 CRC16 已更新');
 
     /* 单独 START 仍是删除确认 */
     if (!tapUntil('START', () => screenText().includes('DELETE THIS SLOT?'), 200, 6)) throw new Error('START 未弹出删除确认');
@@ -678,6 +747,128 @@ try {
     const save1 = sram();
     fs.writeFileSync(path.join(OUT, 'save1.bin'), Buffer.from(save1));
     console.log('已保存 SRAM 快照 save1.bin (' + save1.length + ' 字节)');
+
+    console.log();
+    console.log('== 流程 P0: PMG5 双头 / CRC16 / WAL / 损坏隔离 ==');
+    {
+        const hA = pm5Hdr(save1, PM5_HDR_A);
+        const hB = pm5Hdr(save1, PM5_HDR_B);
+        ok(hA && hB, '双头 A/B 均为有效 PMG5 头 (CRC16)');
+        ok(hA && hB && hA.seq === hB.seq, '双头序列号一致');
+        ok(pm5RecCrc(save1, 0) === rd16(save1, PM5_REC_CRC), '槽位 1 CRC16 与记录一致');
+        ok(pm5RecCrc(save1, 1) === rd16(save1, PM5_REC_CRC + 2), '槽位 2 CRC16 与记录一致');
+        ok(save1[PM5_WAL] !== 0xA5, '正常保存后 WAL 已清空');
+        ok((save1[12] & 0x80) !== 0, '低区 PMG4 兼容头已标记 PMG5');
+
+        /* 损坏 A 头, B 头仍应能启动 */
+        {
+            const one = Buffer.from(save1);
+            one[PM5_HDR_A] = 0x00;
+            boot(one);
+            if (!tapUntil('START', () => pinScreenReady('ENTER PIN', 6), 500, 8)) throw new Error('P0: A 头损坏后未进入解锁');
+            enterPin('123456');
+            waitOk(() => screenText().includes('VAULT MENU'), 'A 头损坏后仍由 B 头启动并解锁', 1200);
+            ok(pm5Hdr(sram(), PM5_HDR_A) === null, 'A 头保持损坏 (未静默改写)');
+            ok(pm5Hdr(sram(), PM5_HDR_B) !== null, 'B 头保持有效');
+        }
+
+        /* 已提交 WAL: 目标记录半写, 上电应重放 new 值 */
+        {
+            const baseRec = Buffer.from(save1.slice(16, 16 + REC_SZ));
+            const newRec = Buffer.from(baseRec);
+            newRec.fill(0);
+            newRec[0] = 0xA5; newRec[1] = 5; newRec.write('WALOK', 2, 'latin1');
+            newRec[22] = 3; newRec.write('WAL', 23, 'latin1');
+            newRec[43] = 5; newRec.write('WALPW', 44, 'latin1');
+            const partial = Buffer.from(baseRec);
+            partial[1] = 5; partial.write('HALF!', 2, 'latin1');
+
+            const wr = Buffer.from(save1);
+            wr.set(partial, 16);
+            const oldCrc = crc16Buf(partial);
+            const newCrc = crc16Buf(newRec);
+            wr16(wr, PM5_REC_CRC, oldCrc);
+            let x = 0;
+            for (let i = 0; i < REC_SZ; i++) x ^= baseRec[i] ^ partial[i];
+            const oldChk = (save1[11] ^ x) & 0xFF;
+            wr[11] = oldChk;
+            let nx = 0;
+            for (let i = 0; i < REC_SZ; i++) nx ^= baseRec[i] ^ newRec[i];
+            const newChk = (save1[11] ^ nx) & 0xFF;
+            const oldCrcBuf = Buffer.from([oldCrc & 0xFF, (oldCrc >> 8) & 0xFF]);
+            const newCrcBuf = Buffer.from([newCrc & 0xFF, (newCrc >> 8) & 0xFF]);
+            walBuild(wr, [
+                { addr: 16, old: partial, new: newRec },
+                { addr: PM5_REC_CRC, old: oldCrcBuf, new: newCrcBuf },
+                { addr: 11, old: Buffer.from([oldChk]), new: Buffer.from([newChk]) }
+            ]);
+
+            boot(wr);
+            if (!tapUntil('START', () => pinScreenReady('ENTER PIN', 6), 500, 8)) throw new Error('P0: WAL 恢复后未进入解锁');
+            enterPin('123456');
+            waitOk(() => screenText().includes('VAULT MENU'), 'WAL 重放后可正常解锁', 1200);
+            const ws = sram();
+            ok(recOf(ws, 0).label.startsWith('WALOK'), 'WAL 重放恢复记录 new 值');
+            ok(pm5RecCrc(ws, 0) === rd16(ws, PM5_REC_CRC), 'WAL 重放恢复记录 CRC');
+            ok(ws[11] === newChk, 'WAL 重放恢复低区全局校验和');
+            ok(ws[PM5_WAL] !== 0xA5, 'WAL 重放后已清空');
+        }
+
+        /* 未提交 WAL 不得应用 (即使 payload 完整) */
+        {
+            const partial = Buffer.from(save1.slice(16, 16 + REC_SZ));
+            partial[1] = 4; partial.write('HALF', 2, 'latin1');
+            const un = Buffer.from(save1);
+            un.set(partial, 16);           /* CRC 表/低校验和仍为旧值 */
+            const newRec = Buffer.from(partial);
+            newRec[1] = 5; newRec.write('NOPE!', 2, 'latin1');
+            const oldCrc = crc16Buf(partial);
+            const newCrc = crc16Buf(newRec);
+            walBuild(un, [
+                { addr: 16, old: partial, new: newRec },
+                { addr: PM5_REC_CRC, old: Buffer.from([oldCrc & 0xFF, oldCrc >> 8]), new: Buffer.from([newCrc & 0xFF, newCrc >> 8]) }
+            ]);
+            un[PM5_WAL] = 0x00;            /* 未提交 */
+            boot(un);
+            if (!tapUntil('START', () => screenText().includes('SAVE DAMAGED'), 500, 8)) throw new Error('P0: 未提交 WAL 应保留损坏提示');
+            if (!tapUntil('A', () => pinScreenReady('ENTER PIN', 6), 500, 8)) throw new Error('P0: 未提交 WAL 损坏提示未继续');
+            enterPin('123456');
+            waitOk(() => screenText().includes('VAULT MENU'), '未提交 WAL 后仍可继续', 1200);
+            const us = sram();
+            ok(recOf(us, 0).label.startsWith('HALF'), '未提交 WAL 的 new 值未被应用');
+            ok(us[PM5_WAL] !== 0xA5, '未提交 WAL 保持未提交');
+        }
+
+        /* 未提交 WAL 不得应用; 记录 CRC 损坏 -> 明确提示并可继续 */
+        {
+            const dmg = Buffer.from(save1);
+            dmg[16 + 2] ^= 0x01;              /* 破坏槽位 1 标签, 不动 CRC 表 */
+            boot(dmg);
+            if (!tapUntil('START', () => screenText().includes('SAVE DAMAGED'), 500, 8)) throw new Error('P0: 损坏记录未提示 SAVE DAMAGED');
+            waitUntil(() => screenText().includes('OTHER DATA INTACT'), 300);
+            ok(screenText().includes('BAD RECORDS:'), '损坏提示显示 BAD RECORDS');
+            ok(screenText().includes('OTHER DATA INTACT'), '损坏提示说明其他数据仍可用');
+            if (!tapUntil('A', () => pinScreenReady('ENTER PIN', 6), 500, 8)) throw new Error('P0: 损坏提示 A=CONTINUE 未进入解锁');
+            enterPin('123456');
+            waitOk(() => screenText().includes('VAULT MENU'), '损坏提示 CONTINUE 后仍可解锁', 1200);
+            waitUntil(() => screenText().includes('RECORDS'), 300);
+            ok(screenText().includes('BAD ') && screenText().includes('RECORDS'), '主菜单显示损坏记录警告');
+            dump('00b-damaged-menu');
+        }
+
+        /* PMG4 -> PMG5 自动迁移: 数据不动, 高区元数据建立 */
+        {
+            boot(buildSyntheticSave(1));
+            if (!tapUntil('START', () => pinScreenReady('ENTER PIN', 6), 600, 8)) throw new Error('P0: PMG4 迁移后未进入解锁');
+            enterPin('123456');
+            waitOk(() => screenText().includes('VAULT MENU'), 'PMG4 自动迁移后可解锁', 1500);
+            const ms = sram();
+            ok(pm5Hdr(ms, PM5_HDR_A) && pm5Hdr(ms, PM5_HDR_B), 'PMG4 迁移后双头有效');
+            ok(pm5RecCrc(ms, 0) === rd16(ms, PM5_REC_CRC), 'PMG4 迁移后槽位 CRC 已建立');
+            ok(recOf(ms, 0).label.startsWith('SLOT01'), 'PMG4 迁移后槽位数据不变');
+            ok((ms[12] & 0x80) !== 0, 'PMG4 迁移后低区标记 PMG5');
+        }
+    }
 
     console.log();
     console.log('== 流程 B: 错误 PIN 三次 -> SYSTEM LOCKED -> 擦除恢复 ==');
@@ -858,6 +1049,7 @@ try {
     s = sram();
     ok(recOf(s, 254).used === 0, '删除后 255 号槽 used = 0');
     ok(checksumOk(s), '删除后 SRAM 校验和正确');
+    ok(rd16(s, PM5_REC_CRC + 254 * 2) === 0, '删除后 255 号槽 CRC 表项清零');
 
     console.log();
     console.log('== 流程 E: v0.3 (PMG3) 存档迁移 -> 新 PIN -> 数据保留 ==');
@@ -893,6 +1085,9 @@ try {
     ok(s[10] === 0, '迁移后错误次数 = 0');
     ok((s[12] & 1) === 1, '迁移后 PIN 标志 = 1');
     ok(checksumOk(s), '迁移后新布局校验和正确');
+    ok(pm5Hdr(s, PM5_HDR_A) && pm5Hdr(s, PM5_HDR_B), 'PMG3 迁移后 PMG5 双头有效');
+    ok(pm5RecCrc(s, 0) === rd16(s, PM5_REC_CRC) && pm5RecCrc(s, 1) === rd16(s, PM5_REC_CRC + 2),
+        'PMG3 迁移后槽位 CRC 表有效');
     const m0 = recOf(s, 0), m1 = recOf(s, 1), m2 = recOf(s, 2);
     ok(m0.used === 0xA5 && m0.llen === 5 && m0.label.startsWith('EMAIL') && m0.plen === 3 && m0.pass.startsWith('ABC'),
         '迁移后槽位 1 标签/密码保留');
@@ -902,8 +1097,8 @@ try {
     ok(m2.label.startsWith('GENACC') && m2.plen === 16 && m2.pass === old2.pass,
         '迁移后槽位 3 的生成密码逐字节保留');
     let tempZero = true;
-    for (let i = MIG_TMP; i < 32768; i++) if (s[i] !== 0) { tempZero = false; break; }
-    ok(tempZero, '迁移暂存区已清零 (不留密码副本)');
+    for (let i = MIG_TMP; i < 20416; i++) if (s[i] !== 0) { tempZero = false; break; }
+    ok(tempZero, '迁移暂存区已清零 (不留密码副本; PMG5 高区元数据除外)');
     const save2 = sram();
     fs.writeFileSync(path.join(OUT, 'save2-migrated.bin'), Buffer.from(save2));
 
@@ -1039,12 +1234,12 @@ try {
     /* --- 快速锁定: 菜单长按 B 1.5 秒; 短按 B 仍为返回 --- */
     frames(3);
     let quickLocked = false;
-    for (let t = 0; t < 240 && !quickLocked; t++) {
+    for (let t = 0; t < 480 && !quickLocked; t++) {
         gb.pressKey('B');
         gb.doFrame();
         quickLocked = screenText().includes('ENTER PIN');
     }
-    if (!quickLocked) quickLocked = waitUntil(() => screenText().includes('ENTER PIN'), 240);
+    if (!quickLocked) quickLocked = waitUntil(() => screenText().includes('ENTER PIN'), 480);
     ok(quickLocked, '长按 B 1.5 秒快速锁定回 PIN 画面');
     if (!quickLocked) throw new Error('快速锁定未触发');
     enterPin('123456');
@@ -1110,6 +1305,7 @@ try {
     ok(s[20432] === 0xA5, '回收站条目 used = 0xA5');
     ok(s[20433] === 5 && String.fromCharCode(...s.slice(20434, 20439)) === 'SHORT', '回收站条目标签 = SHORT');
     ok(binChecksumOk(s), '回收站校验和正确');
+    ok(rd16(s, PM5_BIN_CRC) === crc16Buf(s.slice(20432, 20432 + REC_SZ)), '回收站记录 CRC16 正确');
     ok(checksumOk(s), '删除后主库校验和仍正确');
     fs.writeFileSync(path.join(OUT, 'save4-bin.bin'), Buffer.from(s));
 
@@ -1152,7 +1348,7 @@ try {
         ok(rowText(6).includes('ON'), 'v0.3.1 旧档默认符号 ON');
         ok(rowText(8).includes('3 MIN'), 'v0.3.1 旧档默认锁屏 3 分钟');
         s = sram();
-        ok(s[13] === 0 && s[14] === 0 && s[15] === 0, '读取旧档默认值不写设置区 (保持 0)');
+        ok((s[13] & 0x80) && (s[13] & 3) === 1 && (s[13] & 4) && s[14] === 2 && s[15] === 0, '旧档默认值已规范化为 PMG5 设置 (16/ON/3MIN)');
         if (!tapUntil('B', () => screenText().includes('VAULT MENU'), 80, 6)) throw new Error('流程 F: v0.3.1 旧档设置返回失败');
         menuGoto(0);
         if (!tapUntil('A', () => listReady(), 200, 6)) throw new Error('流程 F: v0.3.1 旧档未进入列表');

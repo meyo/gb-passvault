@@ -8,6 +8,7 @@ build/*
 # 模拟器运行产物；只保留文档引用的关键截图和最终测试日志
 test_out/*
 !test_out/pin_empty.png
+!test_out/title.png
 !test_out/pin_entered.png
 !test_out/pin_move.png
 !test_out/pin_clr.png
@@ -15,6 +16,7 @@ test_out/*
 !test_out/menu.png
 !test_out/list.png
 !test_out/detail.png
+!test_out/damaged-menu.png
 !test_out/settings.png
 !test_out/bin.png
 !test_out/corrupt.png
