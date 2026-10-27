@@ -37,11 +37,11 @@
          ^
     GB PASSWORD
        VAULT
-       V0.3.7
+      V0.3.7.1
     PRESS START
  BATTERY CART NEEDED
   ok   标题文字 GB PASSWORD
-  ok   标题版本 V0.3.7
+  ok   标题版本 V0.3.7.1
   ok   进入设置 6 位 PIN 画面
 --- 02-newpin ---
     SECRET VAULT
@@ -51,7 +51,7 @@
     4     5     6
     7     8     9
    CLR    0    OK
-  B=DEL  START=OK
+ B=DEL  START=OK
   ok   PIN 画面顶部标题 SECRET VAULT
   ok   标题下绘制实心分隔线
   ok   PIN 显示为 6 个立体分格框
@@ -63,7 +63,14 @@
   ok   再次按 1 后分格框显示 11
   ok   CLR 键清空已输入的 PIN
   ok   进入确认 PIN 画面
-  ok   设置完成进入主菜单
+  ok   确认 PIN 后显示居中 PIN SAVED 提示
+  ok   提示条顶部为 9-slice 长方形边框
+  ok   提示条左右边框完整
+  ok   提示条底部为 9-slice 长方形边框
+  ok   提示文字位于屏幕中央 label 内 (第 9 行)
+  ok   设置完成后可选生成 12 位恢复码
+  ok   跳过恢复码时高区扩展块为空
+  ok   跳过恢复码后进入主菜单
 --- 03-menu ---
 
      VAULT MENU
@@ -128,7 +135,7 @@
 --- 05c-generated-password ---
 
  PASSWORD (MAX 36)
- TS2-Xn%MpDNwrw_
+ _c!(Eu.SC29WKD_
   A B C D E F G H
   I J K L M N O P
   Q R S T U V W X
@@ -153,15 +160,15 @@ Aa SYM SPACE  DEL OK
  001 EMAIL
  002 ABCDEFGHIJKLMN
  003 GENACC
- 004 EMPTY -     &$
- 005 EMPTY -     &$
- 006 EMPTY -     &$
- 007 EMPTY -     &$
- 008 EMPTY -     &$
- 009 EMPTY -     &$
- 010 EMPTY -     &$
- 011 EMPTY -     &$
- 012 EMPTY -     &$
+ 004 EMPTY -      )
+ 005 EMPTY -      )
+ 006 EMPTY -      )
+ 007 EMPTY -      )
+ 008 EMPTY -      )
+ 009 EMPTY -      )
+ 010 EMPTY -      )
+ 011 EMPTY -      )
+ 012 EMPTY -      )
  L/R=PAGE SEL=USER
  A=OPEN B=BACK
   ok   列表右上角显示 001/255
@@ -177,15 +184,15 @@ Aa SYM SPACE  DEL OK
  001 EMAIL
  002 ABCDEFGHIJKLMN
  003 GENACC
- 004 EMPTY -     &$
- 005 EMPTY -     &$
- 006 EMPTY -     &$
- 007 EMPTY -     &$
- 008 EMPTY -     &$
- 009 EMPTY -     &$
- 010 EMPTY -     &$
- 011 EMPTY -     &$
- 012 EMPTY -     &$
+ 004 EMPTY -      )
+ 005 EMPTY -      )
+ 006 EMPTY -      )
+ 007 EMPTY -      )
+ 008 EMPTY -      )
+ 009 EMPTY -      )
+ 010 EMPTY -      )
+ 011 EMPTY -      )
+ 012 EMPTY -      )
  L/R=PAGE SEL=USER
  A=OPEN B=BACK
   ok   进入详情页 (SLOT 001/255)
@@ -248,7 +255,7 @@ Aa SYM SPACE  DEL OK
     4     5     6
     7     8     9
    CLR    0    OK
-  B=DEL  START=OK
+ B=DEL  START=OK
 已保存 SRAM 快照 save1.bin (32768 字节)
 
 == 流程 P0: PMG5 双头 / CRC16 / WAL / 损坏隔离 ==
@@ -300,7 +307,7 @@ Aa SYM SPACE  DEL OK
     4     5     6
     7     8     9
    CLR    0    OK
-  B=DEL  START=OK
+ B=DEL  START=OK
   ok   第 1 次错误后回到解锁画面
   ok   第 2 次错误后回到解锁画面
   ok   错误 3 次进入 SYSTEM LOCKED 彩蛋
@@ -308,10 +315,11 @@ Aa SYM SPACE  DEL OK
 
   SYSTEM LOCKED
   VAULT SEALED
+RECOVERY UNAVAILABLE
  HOLD A+B+SEL+START
  3 SECONDS TO WIPE
  OR POWER OFF
- RECOVERY ERASES ALL
+WIPE ERASES ALL DATA
   ok   错误次数持久化 = 3 (偏移 0x0A)
   ok   长按不足 3 秒不触发擦除
   ok   长按 3 秒后擦除, 恢复首次设置流程
@@ -324,7 +332,7 @@ Aa SYM SPACE  DEL OK
     4     5     6
     7     8     9
    CLR    0    OK
-  B=DEL  START=OK
+ B=DEL  START=OK
   ok   擦除后 PIN 标志 = 0
   ok   擦除后错误次数 = 0
   ok   擦除后槽位 1 为空
@@ -354,15 +362,15 @@ Aa SYM SPACE  DEL OK
  001 EMAIL
  002 ABCDEFGHIJKLMN
  003 GENACC
- 004 EMPTY -     &$
- 005 EMPTY -     &$
- 006 EMPTY -     &$
- 007 EMPTY -     &$
- 008 EMPTY -     &$
- 009 EMPTY -     &$
- 010 EMPTY -     &$
- 011 EMPTY -     &$
- 012 EMPTY -     &$
+ 004 EMPTY -      )
+ 005 EMPTY -      )
+ 006 EMPTY -      )
+ 007 EMPTY -      )
+ 008 EMPTY -      )
+ 009 EMPTY -      )
+ 010 EMPTY -      )
+ 011 EMPTY -      )
+ 012 EMPTY -      )
  L/R=PAGE SEL=USER
  A=OPEN B=BACK
   ok   断电重开后账号 EMAIL 仍在
@@ -437,18 +445,18 @@ Aa SYM SPACE  DEL OK
 --- 17-list-window-bottom ---
  ACCOUNTS    255/255
          HOLD B=LOCK
- 244 EMPTY -     &$
- 245 EMPTY -     &$
- 246 EMPTY -     &$
- 247 EMPTY -     &$
- 248 EMPTY -     &$
- 249 EMPTY -     &$
- 250 EMPTY -     &$
- 251 EMPTY -     &$
- 252 EMPTY -     &$
- 253 EMPTY -     &$
- 254 EMPTY -     &$
- 255 EMPTY -     &$
+ 244 EMPTY -      )
+ 245 EMPTY -      )
+ 246 EMPTY -      )
+ 247 EMPTY -      )
+ 248 EMPTY -      )
+ 249 EMPTY -      )
+ 250 EMPTY -      )
+ 251 EMPTY -      )
+ 252 EMPTY -      )
+ 253 EMPTY -      )
+ 254 EMPTY -      )
+ 255 EMPTY -      )
  L/R=PAGE SEL=USER
  A=OPEN B=BACK
   ok   底部再右跳保持 255/255
@@ -496,13 +504,15 @@ Aa SYM SPACE  DEL OK
     4     5     6
     7     8     9
    CLR    0    OK
-  B=DEL  START=OK
+ B=DEL  START=OK
   ok   旧 PIN 输错后错误次数持久化 = 1
   ok   错误后重新显示旧 PIN 画面
   ok   旧档错误次数写入后旧校验和仍正确
   ok   旧 PIN 正确后要求设置新 6 位 PIN
   ok   迁移: 进入新 PIN 确认画面
-  ok   迁移完成并直接进入主菜单
+  ok   迁移完成显示可选恢复码提示
+  ok   PMG3 迁移完成后可创建恢复码
+  ok   迁移完成并跳过恢复码进入主菜单
 --- 20-migrated-menu ---
 
      VAULT MENU
@@ -520,6 +530,7 @@ Aa SYM SPACE  DEL OK
   ok   迁移后 PIN 标志 = 1
   ok   迁移后新布局校验和正确
   ok   PMG3 迁移后 PMG5 双头有效
+  ok   PMG3 迁移跳过恢复码时高区扩展块为空
   ok   PMG3 迁移后槽位 CRC 表有效
   ok   迁移后槽位 1 标签/密码保留
   ok   迁移后槽位 1 用户名留空
@@ -532,15 +543,15 @@ Aa SYM SPACE  DEL OK
  001 EMAIL
  002 MIXED
  003 GENACC
- 004 EMPTY -     &$
- 005 EMPTY -     &$
- 006 EMPTY -     &$
- 007 EMPTY -     &$
- 008 EMPTY -     &$
- 009 EMPTY -     &$
- 010 EMPTY -     &$
- 011 EMPTY -     &$
- 012 EMPTY -     &$
+ 004 EMPTY -      )
+ 005 EMPTY -      )
+ 006 EMPTY -      )
+ 007 EMPTY -      )
+ 008 EMPTY -      )
+ 009 EMPTY -      )
+ 010 EMPTY -      )
+ 011 EMPTY -      )
+ 012 EMPTY -      )
  L/R=PAGE SEL=USER
  A=OPEN B=BACK
   ok   迁移后列表显示旧账号
@@ -562,6 +573,7 @@ Aa SYM SPACE  DEL OK
  PASSWORD LENGTH 12
  SYMBOLS        OFF
  AUTO-LOCK    1 MIN
+ RECOVERY CODE  OFF
  A/<> = CHANGE
  B=BACK (HOLD=LOCK)
   ok   设置写入头部: 12 位 + 符号 OFF + 有效位
@@ -589,14 +601,14 @@ Aa SYM SPACE  DEL OK
  002 abcdefghijklmn
  003 -
  004 -
- 005 EMPTY -     &$
- 006 EMPTY -     &$
- 007 EMPTY -     &$
- 008 EMPTY -     &$
- 009 EMPTY -     &$
- 010 EMPTY -     &$
- 011 EMPTY -     &$
- 012 EMPTY -     &$
+ 005 EMPTY -      )
+ 006 EMPTY -      )
+ 007 EMPTY -      )
+ 008 EMPTY -      )
+ 009 EMPTY -      )
+ 010 EMPTY -      )
+ 011 EMPTY -      )
+ 012 EMPTY -      )
  L/R=PAGE SEL=LABEL
  A=OPEN B=BACK
   ok   列表视图模式持久化 (头部 0x0F = 1)
@@ -610,14 +622,14 @@ Aa SYM SPACE  DEL OK
  002 abcdefghijklmn
  003 -
  004 -
- 005 EMPTY -     &$
- 006 EMPTY -     &$
- 007 EMPTY -     &$
- 008 EMPTY -     &$
- 009 EMPTY -     &$
- 010 EMPTY -     &$
- 011 EMPTY -     &$
- 012 EMPTY -     &$
+ 005 EMPTY -      )
+ 006 EMPTY -      )
+ 007 EMPTY -      )
+ 008 EMPTY -      )
+ 009 EMPTY -      )
+ 010 EMPTY -      )
+ 011 EMPTY -      )
+ 012 EMPTY -      )
  L/R=PAGE SEL=LABEL
  A=OPEN B=BACK
   ok   切回标签视图持久化 (0x0F = 0)
@@ -632,7 +644,7 @@ Aa SYM SPACE  DEL OK
     4     5     6
     7     8     9
    CLR    0    OK
-  B=DEL  START=OK
+ B=DEL  START=OK
   ok   流程 F: 自动锁屏后可重新解锁
   ok   长按 B 1.5 秒快速锁定回 PIN 画面
   ok   流程 F: 快速锁定后可重新解锁
@@ -686,6 +698,119 @@ Aa SYM SPACE  DEL OK
   ok   流程 G: 清空后回收站校验和正确
   ok   流程 G: 回收站操作不影响主库校验和
 
+== 流程 R: 12 位恢复码 (创建/校验/重设/替换/锁定恢复/移除) ==
+  ok   流程 R: 解锁进入菜单
+  ok   流程 R: 初始恢复码状态 OFF
+  ok   流程 R: 未设置时提示创建恢复码
+--- 27-recovery-none ---
+
+   RECOVERY CODE
+    NO CODE SET
+ CREATE 12-DIGIT
+ RECOVERY CODE?
+  A=YES  B=NO
+  B=BACK (HOLD=LOCK)
+  ok   流程 R: 创建前高区无恢复码块
+  ok   流程 R: 生成 12 位数字恢复码
+  ok   流程 R: 恢复码按 4-4-4 分组显示
+--- 28-recovery-code ---
+
+   YOUR RECOVERY
+    CODE
+   0068 7694 1071
+ WRITE IT DOWN NOW
+ IT WILL NOT SHOW
+ AGAIN
+  A=SAVE  B=CANCEL
+  ok   流程 R: 按 A 保存前不写入 hash
+  ok   流程 R: 保存后返回设置且状态 ON
+  ok   流程 R: 双份 RCV1 块 CRC16 有效
+  ok   流程 R: 双块均标记恢复码已设置
+  ok   流程 R: 双块序列号一致且非 0
+  ok   流程 R: 双块 64-bit hash 与恢复码匹配
+  ok   流程 R: 扩展块中不保存恢复码明文
+  ok   流程 R: 创建恢复码后 WAL 已清空
+  ok   流程 R: 创建恢复码不影响低区校验和
+  ok   流程 R: 已设置恢复码时 PIN 画面提供 SELECT
+  ok   流程 R: PIN 画面 SELECT 进入恢复码输入
+--- 29-recovery-entry ---
+    SECRET VAULT
+   RECOVERY CODE
+  ENTER 12 DIGITS
+   ____ ____ ____
+  B=DEL  START=OK
+    1     2     3
+    4     5     6
+    7     8     9
+   CLR    0    OK
+    SELECT=BACK
+  ok   流程 R: 错误恢复码显示 WRONG CODE
+  ok   流程 R: 错误恢复码后重新显示输入画面
+  ok   流程 R: 正确恢复码被接受并要求新 PIN
+  ok   流程 R: 进入确认新 PIN
+  ok   流程 R: 恢复码重设 PIN 后进入主菜单
+  ok   流程 R: 新 PIN 111111 混淆存储
+  ok   流程 R: 恢复后错误次数清零
+  ok   流程 R: 重设 PIN 不改变恢复码块
+  ok   流程 R: 恢复后旧 PIN 123456 被拒绝
+  ok   流程 R: 恢复后的新 PIN 可解锁
+  ok   流程 R: 已设置时提供替换/移除
+--- 30-recovery-active ---
+
+   RECOVERY CODE
+  REPLACE CODE
+  REMOVE CODE
+   CODE IS ACTIVE
+  A=SELECT B=BACK
+  B=BACK (HOLD=LOCK)
+  ok   流程 R: 替换时生成新的 12 位恢复码
+  ok   流程 R: 替换保存后显示 CODE SAVED
+  ok   流程 R: 替换后双块序列号递增
+  ok   流程 R: 替换后 hash 对应新恢复码
+  ok   流程 R: 替换恢复码后 WAL 已清空
+  ok   流程 R: 替换后旧恢复码被拒绝
+  ok   流程 R: 取消恢复码输入返回 PIN 画面
+  ok   流程 R: 新码恢复进入确认 PIN
+  ok   流程 R: 新恢复码重设 PIN 后进入主菜单
+  ok   流程 R: 新码恢复的 PIN 222222 混淆存储
+  ok   流程 R: 错误 PIN 1 次后回到解锁
+  ok   流程 R: 错误 PIN 2 次后回到解锁
+  ok   流程 R: 三次错误进入 SYSTEM LOCKED
+  ok   流程 R: 锁定画面提供 SELECT 恢复
+--- 31-recovery-locked ---
+
+  SYSTEM LOCKED
+  VAULT SEALED
+  SELECT=RECOVERY
+ HOLD A+B+SEL+START
+ 3 SECONDS TO WIPE
+ OR POWER OFF
+WIPE ERASES ALL DATA
+  ok   流程 R: 锁定恢复进入确认 PIN
+  ok   流程 R: 锁定画面恢复码重设 PIN 成功
+  ok   流程 R: 锁定恢复后 PIN=123456 且错误次数清零
+  ok   流程 R: 移除前 PIN 解锁
+  ok   流程 R: 移除恢复码需要确认
+  ok   流程 R: 移除后显示 RECOVERY REMOVED
+  ok   流程 R: 移除后双块有效但标记未设置
+  ok   流程 R: 移除后序列号递增
+  ok   流程 R: 移除恢复码后 WAL 已清空
+  ok   流程 R: 移除后 PIN 画面不再显示 SELECT 恢复
+  ok   流程 R: 移除后按 SELECT 不进入恢复界面
+  ok   流程 R: 移除后错误 PIN 1 次后回到解锁
+  ok   流程 R: 移除后错误 PIN 2 次后回到解锁
+  ok   流程 R: 移除后三次错误仍进入锁定画面
+  ok   流程 R: 未设置恢复码时锁定画面提示 RECOVERY UNAVAILABLE
+--- 32-recovery-unavailable ---
+
+  SYSTEM LOCKED
+  VAULT SEALED
+RECOVERY UNAVAILABLE
+ HOLD A+B+SEL+START
+ 3 SECONDS TO WIPE
+ OR POWER OFF
+WIPE ERASES ALL DATA
+
 ==============================
-断言: 286 / 286 通过
+断言: 353 / 353 通过
 全部通过

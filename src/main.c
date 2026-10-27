@@ -1,5 +1,5 @@
 /*
- * GB Password Vault v0.3.7
+ * GB Password Vault v0.3.7.1
  * ------------------------------------------------------------------
  * 在真实 Game Boy (DMG / GBC 兼容模式 / GBA) 上运行的离线密码管理器。
  * 编译工具链: GBDK-2020 4.5.0  (C/SDCC)
@@ -8,7 +8,10 @@
  * 功能:
  *   - 首次开机: 设置 6 位数字 PIN (SRAM 中以 +7 取模混淆存储)
  *   - 开机解锁: 3x4 数字键盘输入 PIN, 错误 3 次进入 SYSTEM LOCKED 彩蛋
+ *   - 忘记 PIN: 可选 12 位恢复码 (只存双份 hash 到高区扩展块), 输入恢复码可重设 PIN
  *   - 主菜单:   查看账号 / 添加账号 / 修改 PIN / 锁库
+ *   - 设置:     生成器长度/符号/自动锁屏/列表视图/创建或移除恢复码
+ *   - 提示条:   保存成功等瞬时提示使用屏幕正中的长方形 label
  *   - 账号:     255 个槽位, 每槽 20 字符标签 + 20 字符用户名 + 36 字符密码
  *   - 添加流程: 屏幕虚拟键盘 (大写/小写/符号页三种模式, D-pad 选字 A 输入);
  *              用户名可留空; 密码页按 SELECT 生成 16 位随机强密码
@@ -28,6 +31,8 @@
  *   0x54F0  PMG5 双头 B
  *   0x5510  槽位 CRC16 表 255 x 2
  *   0x5710  回收站 CRC16 表 16 x 2
+ *   0x5730  恢复码扩展块 A (RCV1, 20B)
+ *   0x5750  恢复码扩展块 B (RCV1, 20B)
  *   0x5800  WAL 写前日志 (commit + 变长 old/new 段)
  *   低区继续维护 PMG4 全局 XOR, 便于旧版只读; PMG5 高区是权威格式.
  *
@@ -254,6 +259,19 @@ static void wb(uint16_t a, uint8_t v)
 
 #define PM5_REC_CRC     ((uint16_t)0x5510)   /* 255 * 2 = 510 */
 #define PM5_BIN_CRC     ((uint16_t)0x5710)   /* 16 * 2 = 32  */
+#define PM5_RCV_A       ((uint16_t)0x5730)   /* 恢复码 hash 块 A */
+#define PM5_RCV_B       ((uint16_t)0x5750)   /* 恢复码 hash 块 B */
+#define PM5_RCV_SIZE    20
+#define RCV_VERSION     1
+#define RCV_FLAG_SET    0x01
+#define RCV_OFS_MAGIC   0
+#define RCV_OFS_VER     4
+#define RCV_OFS_FLAGS   5
+#define RCV_OFS_SEQ     6
+#define RCV_OFS_HASH    8
+#define RCV_HASH_LEN    8
+#define RCV_OFS_CRC     16
+#define RCV_CODE_LEN    12
 #define PM5_WAL_BASE    ((uint16_t)0x5800)
 #define PM5_WAL_MAX     256
 #define PM5_WAL_COMMIT  PM5_WAL_BASE
@@ -268,6 +286,9 @@ static uint8_t  bad_slots[(N_SLOTS + 7) / 8];
 static uint8_t  bad_bin[(BIN_SLOTS + 7) / 8];
 static uint16_t vault_bad_count;
 static uint8_t  damage_ack;
+static uint8_t  rcv_set;
+static uint16_t rcv_seq;
+static uint8_t  rcv_hash[RCV_HASH_LEN];
 static void pm5_build_tables(void);
 static void pm5_scan_crc(void);
 static uint16_t bin_crc_addr(uint8_t i);
@@ -515,6 +536,162 @@ static void wal_recover(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* 恢复码扩展块: 可选 12 位恢复码, 只保存双份 64-bit hash.              */
+/* 块格式 (20B): "RCV1"(4) ver(1) flags(1) seq(2) hash(8) crc16(2)     */
+/* reserved(2). 双块 + seq + CRC, 写入走 WAL, 断电不会留下半块.        */
+/* ------------------------------------------------------------------ */
+
+static void rcv_cache_clear(void)
+{
+    rcv_set = 0;
+    rcv_seq = 0;
+    memset(rcv_hash, 0, sizeof(rcv_hash));
+}
+
+/* 两个 32 位 FNV-1a 变体拼接; 只用于恢复码校验, 不是通用加密哈希. */
+static void recovery_hash(const uint8_t *code, uint8_t *out)
+{
+    uint32_t h1 = 2166136261UL;
+    uint32_t h2 = 2166136261UL ^ 0x9E3779B9UL;
+    uint8_t i, d;
+
+    for (i = 0; i < RCV_CODE_LEN; i++) {
+        d = (uint8_t)(code[i] + 1u);
+        h1 ^= (uint32_t)d;
+        h1 *= 16777619UL;
+        h2 ^= (uint32_t)(uint8_t)(d ^ 0x5Au);
+        h2 *= 16777619UL;
+    }
+    h1 ^= 0x504D4735UL;                 /* "PMG5" */
+    h2 ^= 0x52435631UL;                 /* "RCV1" */
+    out[0] = (uint8_t)h1; out[1] = (uint8_t)(h1 >> 8);
+    out[2] = (uint8_t)(h1 >> 16); out[3] = (uint8_t)(h1 >> 24);
+    out[4] = (uint8_t)h2; out[5] = (uint8_t)(h2 >> 8);
+    out[6] = (uint8_t)(h2 >> 16); out[7] = (uint8_t)(h2 >> 24);
+}
+
+/* 调用者必须已 sram_on(). */
+static uint8_t pm5_rcv_valid(uint16_t a, uint16_t *seq, uint8_t *present,
+                             uint8_t *hash)
+{
+    uint8_t i;
+    uint16_t c = 0xFFFF;
+
+    if (rb(a) != 'R' || rb((uint16_t)(a + 1)) != 'C' ||
+        rb((uint16_t)(a + 2)) != 'V' || rb((uint16_t)(a + 3)) != '1') return 0;
+    if (rb((uint16_t)(a + RCV_OFS_VER)) != RCV_VERSION) return 0;
+    for (i = 0; i < RCV_OFS_CRC; i++)
+        c = crc16_update(c, rb((uint16_t)(a + i)));
+    if (c != rd16((uint16_t)(a + RCV_OFS_CRC))) return 0;
+    *seq = rd16((uint16_t)(a + RCV_OFS_SEQ));
+    *present = (rb((uint16_t)(a + RCV_OFS_FLAGS)) & RCV_FLAG_SET) ? 1 : 0;
+    for (i = 0; i < RCV_HASH_LEN; i++)
+        hash[i] = rb((uint16_t)(a + RCV_OFS_HASH + i));
+    return 1;
+}
+
+/* 读取双块中有效且 seq 较新的一个; 无有效块时清除缓存. */
+static void pm5_rcv_load(void)
+{
+    uint8_t va, vb, pa = 0, pb = 0, ha[RCV_HASH_LEN], hb[RCV_HASH_LEN];
+    uint16_t sa = 0, sb = 0;
+
+    sram_on();
+    va = pm5_rcv_valid(PM5_RCV_A, &sa, &pa, ha);
+    vb = pm5_rcv_valid(PM5_RCV_B, &sb, &pb, hb);
+    sram_off();
+    if (!va && !vb) { rcv_cache_clear(); return; }
+    if (va && (!vb || sa >= sb)) {
+        rcv_seq = sa;
+        rcv_set = pa;
+        memcpy(rcv_hash, ha, RCV_HASH_LEN);
+    } else {
+        rcv_seq = sb;
+        rcv_set = pb;
+        memcpy(rcv_hash, hb, RCV_HASH_LEN);
+    }
+}
+
+static void rcv_block_build(uint8_t *b, uint16_t seq, uint8_t present,
+                            const uint8_t *hash)
+{
+    uint8_t i;
+    uint16_t c = 0xFFFF;
+
+    memset(b, 0, PM5_RCV_SIZE);
+    b[0] = 'R'; b[1] = 'C'; b[2] = 'V'; b[3] = '1';
+    b[RCV_OFS_VER] = RCV_VERSION;
+    b[RCV_OFS_FLAGS] = present ? RCV_FLAG_SET : 0x00;
+    b[RCV_OFS_SEQ] = (uint8_t)(seq & 0xFF);
+    b[RCV_OFS_SEQ + 1] = (uint8_t)(seq >> 8);
+    for (i = 0; i < RCV_HASH_LEN; i++) b[RCV_OFS_HASH + i] = hash[i];
+    for (i = 0; i < RCV_OFS_CRC; i++) c = crc16_update(c, b[i]);
+    b[RCV_OFS_CRC] = (uint8_t)(c & 0xFF);
+    b[RCV_OFS_CRC + 1] = (uint8_t)(c >> 8);
+}
+
+/* 原子写双块: WAL 记录旧/新块, 提交后写目标, 最后清 commit. */
+static void pm5_rcv_write_pair(uint16_t seq, uint8_t present,
+                               const uint8_t *hash)
+{
+    uint8_t olda[PM5_RCV_SIZE], oldb[PM5_RCV_SIZE];
+    uint8_t newa[PM5_RCV_SIZE], newb[PM5_RCV_SIZE];
+    uint8_t i;
+
+    sram_on();
+    for (i = 0; i < PM5_RCV_SIZE; i++) {
+        olda[i] = rb((uint16_t)(PM5_RCV_A + i));
+        oldb[i] = rb((uint16_t)(PM5_RCV_B + i));
+    }
+    sram_off();
+    rcv_block_build(newa, seq, present, hash);
+    rcv_block_build(newb, seq, present, hash);
+
+    wal_reset();
+    wal_add(PM5_RCV_A, PM5_RCV_SIZE, olda, newa);
+    wal_add(PM5_RCV_B, PM5_RCV_SIZE, oldb, newb);
+    wal_commit();
+
+    sram_on();
+    for (i = 0; i < PM5_RCV_SIZE; i++) {
+        wb((uint16_t)(PM5_RCV_A + i), newa[i]);
+        wb((uint16_t)(PM5_RCV_B + i), newb[i]);
+    }
+    sram_off();
+    wal_clear();
+}
+
+static void pm5_rcv_save(const uint8_t *hash)
+{
+    rcv_seq = (uint16_t)(rcv_seq + 1);
+    pm5_rcv_write_pair(rcv_seq, 1, hash);
+    rcv_set = 1;
+    memcpy(rcv_hash, hash, RCV_HASH_LEN);
+}
+
+static void pm5_rcv_clear(void)
+{
+    uint8_t zero[RCV_HASH_LEN];
+
+    memset(zero, 0, sizeof(zero));
+    rcv_seq = (uint16_t)(rcv_seq + 1);
+    pm5_rcv_write_pair(rcv_seq, 0, zero);
+    rcv_set = 0;
+    memset(rcv_hash, 0, sizeof(rcv_hash));
+}
+
+static uint8_t pm5_rcv_verify(const uint8_t *code)
+{
+    uint8_t h[RCV_HASH_LEN];
+    uint8_t i;
+
+    recovery_hash(code, h);
+    for (i = 0; i < RCV_HASH_LEN; i++)
+        if (h[i] != rcv_hash[i]) return 0;
+    return 1;
+}
+
+/* ------------------------------------------------------------------ */
 /* 低区 PMG4 头 / 兼容层                                                */
 /* ------------------------------------------------------------------ */
 
@@ -664,6 +841,7 @@ static uint8_t vault_load(void)
     uint8_t i, unknown = 0;
 
     if (pm5_hdr_load()) {
+        pm5_rcv_load();
         sram_on();
         if (magic_is(MAGIC) && rb(OFS_CHK) == chk_calc()) {
             if (pm5_low_matches()) {
@@ -695,9 +873,11 @@ static uint8_t vault_load(void)
             vault_chk = rb(OFS_CHK);
             chk_valid = 1;
             sram_off();
+            pm5_rcv_load();
             return LOAD_PM4;
         }
         sram_off();
+        rcv_cache_clear();
         return LOAD_CORRUPT;
     }
 
@@ -707,9 +887,11 @@ static uint8_t vault_load(void)
             legacy_tries = rb(8);
             if (legacy_tries > 3) legacy_tries = 3;
             sram_off();
+            rcv_cache_clear();           /* v0.3 没有恢复码, 迁移会清高区 */
             return LOAD_LEGACY;
         }
         sram_off();
+        rcv_cache_clear();
         return LOAD_CORRUPT;
     }
 
@@ -726,6 +908,7 @@ static uint8_t vault_load(void)
     chk_valid = 0;
     gen_idx = 1; gen_sym = 1; lock_idx = 2; list_user = 0;
     for (i = 0; i < PIN_LEN; i++) pin_obf[i] = 0;
+    rcv_cache_clear();
     return unknown ? LOAD_UNSUPPORTED : LOAD_EMPTY;
 }
 
@@ -745,6 +928,7 @@ static void vault_clear_slots(void)
     chk_valid = 0;
     bin_ready = 0;
     bin_head = 0;
+    rcv_cache_clear();
 }
 
 /* SYSTEM LOCKED 彩蛋: 擦除全部数据 */
@@ -1378,9 +1562,20 @@ static void draw_frame(uint8_t x, uint8_t y, uint8_t w, uint8_t h)
     set_bkg_tiles(x, (uint8_t)(y + h - 1), w, 1, row);
 }
 
+/* 屏幕正中的长方形提示 label: 9-slice 边框 + 居中文字.
+ * 先清空整个 8..10 行, 避免残留底层键盘/列表内容贴在边框外. */
 static void toast(const char *msg)
 {
-    put_str(1, 15, msg);
+    uint8_t n = 0, w, x, y;
+    while (msg[n] && n < 18) n++;
+    w = (uint8_t)(n + 4);
+    if (w > 20) w = 20;
+    if (w < 8) w = 8;
+    x = (uint8_t)((20 - w) >> 1);
+    for (y = 8; y <= 10; y++)
+        put_fixed(0, y, "", 20, 0);
+    draw_frame(x, 8, w, 3);
+    put_str((uint8_t)((20 - n) >> 1), 9, msg);
     delay(900);
 }
 
@@ -1461,6 +1656,42 @@ static uint8_t rng_below(uint8_t n)
         r = rng_byte();
     } while ((uint16_t)r >= limit);
     return (uint8_t)(r % n);
+}
+
+/* 32 位 xorshift, 只用于生成 12 位恢复码.
+ * 种子混入 PIN 输入期间累计的 rng_state + DIV/LY/TIMA, 状态空间远大于
+ * 原 16 位 LCG; 真机上人工按键间隔提供额外熵. */
+static uint32_t rng32_state;
+
+static uint32_t rng32_next(void)
+{
+    uint32_t x = rng32_state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    rng32_state = x;
+    return x;
+}
+
+static void rng32_seed(void)
+{
+    uint8_t i;
+    rng32_state = 0x9E3779B9UL
+                ^ ((uint32_t)rng_state << 16)
+                ^ ((uint32_t)DIV_REG << 8)
+                ^ (uint32_t)LY_REG
+                ^ ((uint32_t)TIMA_REG << 24);
+    if (!rng32_state) rng32_state = 0x1D2C3B4AUL;
+    for (i = 0; i < 4; i++) (void)rng32_next();
+}
+
+static uint8_t rng32_below10(void)
+{
+    uint8_t r;
+    do {
+        r = (uint8_t)(rng32_next() >> 24);
+    } while (r >= 250);
+    return (uint8_t)(r % 10);
 }
 
 /* 生成强密码: 按设置长度 (12/16/24/32), 可选符号 */
@@ -1635,12 +1866,16 @@ static void pad_draw_keypad(uint8_t sel)
 }
 
 /* 输入 max 位 PIN (常规 6 位, 迁移旧档 4 位), 集满或按 OK/START 返回;
- * 返回 1 = 输入过程中自动锁屏 (仅修改 PIN 时启用) */
-static uint8_t pin_entry(const char *title, uint8_t *out, uint8_t max)
+ * 返回 0=完成, 1=输入过程中自动锁屏 (仅修改 PIN 时启用),
+ * 2=按 SELECT 请求恢复码流程 (仅 unlock 传入 allow_rec=1). */
+static uint8_t pin_entry(const char *title, uint8_t *out, uint8_t max,
+                         uint8_t allow_rec)
 {
     uint8_t n = 0, cx = 0, cy = 0, k, old;
     uint8_t tlen = 0, tx;
+    uint8_t mask = J_UP | J_DOWN | J_LEFT | J_RIGHT | J_A | J_B | J_START;
 
+    if (allow_rec) mask |= J_SELECT;
     while (title[tlen] && tlen < 20) tlen++;
     tx = (uint8_t)((20 - (tlen < 20 ? tlen : 20)) >> 1);
     screen_clear();
@@ -1648,12 +1883,13 @@ static uint8_t pin_entry(const char *title, uint8_t *out, uint8_t max)
     put_str(tx, 1, title);
     pin_field(out, n, max);
     pad_draw_keypad(0);
-    put_str(2, 17, "B=DEL  START=OK");
+    put_str(1, 17, allow_rec ? "B=DEL SEL=RECOVERY" : "B=DEL  START=OK");
 
     while (1) {
-        k = pin_idle ? ui_getkey(J_UP | J_DOWN | J_LEFT | J_RIGHT | J_A | J_B | J_START)
-                     : getkey(J_UP | J_DOWN | J_LEFT | J_RIGHT | J_A | J_B | J_START);
-        if (!k) return 1;                   /* 自动锁屏 (仅 pin_idle 时可能) */
+        k = pin_idle ? ui_getkey(mask) : getkey(mask);
+        if (!k) return 1;
+        rng_mix((uint16_t)(k | ((uint16_t)TIMA_REG << 8)));
+        if (allow_rec && (k & J_SELECT)) return 2;
 
         if (k & J_UP) {
             if (cy) {
@@ -1714,6 +1950,169 @@ static uint8_t pin_entry(const char *title, uint8_t *out, uint8_t max)
             if (n == max) return 0;
         }
     }
+}
+
+/* 12 位恢复码显示: 4-4-4 分组, 空位用 '_' */
+static void code_field(const uint8_t *out, uint8_t n)
+{
+    char line[15];
+    uint8_t i, p = 0;
+
+    for (i = 0; i < RCV_CODE_LEN; i++) {
+        if (i == 4 || i == 8) line[p++] = ' ';
+        line[p++] = (i < n) ? (char)('0' + out[i]) : '_';
+    }
+    line[p] = 0;
+    put_str(3, 3, line);
+}
+
+/* 输入 12 位恢复码; 集满自动提交. 返回 0=完成, 1=取消.
+ * 复用 PIN 图形键盘, 但用单行 4-4-4 字段代替 12 个 3x3 框. */
+static uint8_t code_entry(uint8_t *out)
+{
+    uint8_t n = 0, cx = 0, cy = 0, k, old;
+
+    screen_clear();
+    draw_title();
+    put_str(3, 1, "RECOVERY CODE");
+    put_str(2, 2, "ENTER 12 DIGITS");
+    code_field(out, n);
+    put_str(2, 4, "B=DEL  START=OK");
+    pad_draw_keypad(0);
+    put_str(4, 17, "SELECT=BACK");
+
+    while (1) {
+        k = getkey(J_UP | J_DOWN | J_LEFT | J_RIGHT | J_A | J_B |
+                   J_START | J_SELECT);
+        if (!k) return 1;
+        rng_mix((uint16_t)(k | ((uint16_t)TIMA_REG << 8)));
+
+        if (k & J_SELECT) return 1;
+        if (k & J_UP) {
+            if (cy) {
+                old = (uint8_t)(cy * 3 + cx);
+                cy--;
+                pad_key(old, 0);
+                pad_key((uint8_t)(cy * 3 + cx), 1);
+            }
+            continue;
+        }
+        if (k & J_DOWN) {
+            if (cy < 3) {
+                old = (uint8_t)(cy * 3 + cx);
+                cy++;
+                pad_key(old, 0);
+                pad_key((uint8_t)(cy * 3 + cx), 1);
+            }
+            continue;
+        }
+        if (k & J_LEFT) {
+            if (cx) {
+                old = (uint8_t)(cy * 3 + cx);
+                cx--;
+                pad_key(old, 0);
+                pad_key((uint8_t)(cy * 3 + cx), 1);
+            }
+            continue;
+        }
+        if (k & J_RIGHT) {
+            if (cx < 2) {
+                old = (uint8_t)(cy * 3 + cx);
+                cx++;
+                pad_key(old, 0);
+                pad_key((uint8_t)(cy * 3 + cx), 1);
+            }
+            continue;
+        }
+        if (k & J_B) {
+            if (n) { n--; code_field(out, n); }
+            continue;
+        }
+        if (k & J_A) {
+            uint8_t idx = (uint8_t)(cy * 3 + cx);
+            if (idx <= 8) {
+                if (n < RCV_CODE_LEN) {
+                    out[n] = (uint8_t)(idx + 1);
+                    n++;
+                    code_field(out, n);
+                }
+            } else if (idx == 9) {
+                if (n) { n = 0; code_field(out, n); }
+            } else if (idx == 10) {
+                if (n < RCV_CODE_LEN) {
+                    out[n] = 0;
+                    n++;
+                    code_field(out, n);
+                }
+            }
+            if (n == RCV_CODE_LEN) return 0;
+            continue;
+        }
+        if (k & J_START) {
+            if (n == RCV_CODE_LEN) return 0;
+        }
+    }
+}
+
+static void recovery_generate(uint8_t *code)
+{
+    uint8_t i;
+    rng32_seed();
+    for (i = 0; i < RCV_CODE_LEN; i++)
+        code[i] = rng32_below10();
+}
+
+/* 生成并显示 12 位恢复码; A=保存 hash, B=取消(不保存).
+ * 返回 1 = 自动锁屏, 0 = 已保存或取消. */
+static uint8_t recovery_create_ui(void)
+{
+    uint8_t code[RCV_CODE_LEN], hash[RCV_HASH_LEN], k;
+    char line[15];
+    uint8_t i, p = 0;
+
+    recovery_generate(code);
+    for (i = 0; i < RCV_CODE_LEN; i++) {
+        if (i == 4 || i == 8) line[p++] = ' ';
+        line[p++] = (char)('0' + code[i]);
+    }
+    line[p] = 0;
+
+    screen_clear();
+    draw_frame(0, 1, 20, 15);
+    put_str(3, 3, "YOUR RECOVERY");
+    put_str(4, 4, "CODE");
+    put_str(3, 6, line);
+    put_str(1, 8, "WRITE IT DOWN NOW");
+    put_str(1, 9, "IT WILL NOT SHOW");
+    put_str(1, 10, "AGAIN");
+    put_str(2, 13, "A=SAVE  B=CANCEL");
+
+    k = ui_getkey_noninput(J_A | J_B);
+    if (!k || k == KEY_LOCKED) return 1;
+    if (k & J_B) return 0;
+
+    recovery_hash(code, hash);
+    pm5_rcv_save(hash);
+    toast("CODE SAVED");
+    return 0;
+}
+
+/* 首次设置/迁移完成后的可选恢复码提示 */
+static void recovery_offer(void)
+{
+    uint8_t k;
+
+    screen_clear();
+    draw_frame(1, 2, 18, 12);
+    put_str(2, 4, "OPTIONAL SAFETY");
+    put_str(4, 5, "ADD 12-DIGIT");
+    put_str(3, 6, "RECOVERY CODE?");
+    put_str(3, 8, "USE IF PIN IS");
+    put_str(5, 9, "FORGOTTEN");
+    put_str(3, 11, "A=YES  B=SKIP");
+
+    k = getkey(J_A | J_B);
+    if (k & J_A) (void)recovery_create_ui();
 }
 
 /* ------------------------------------------------------------------ */
@@ -2425,18 +2824,22 @@ static uint8_t bin_screen(void)
 /* 解锁 / 初始化 / 改 PIN / 锁定彩蛋                                    */
 /* ------------------------------------------------------------------ */
 
-static void locked_screen(void)
+/* 返回 1 = 用户按 SELECT 请求恢复码流程; 0 = 已擦除 (或不允许恢复).
+ * allow_recovery=0 用于 v0.3 迁移的 4 位旧 PIN, 此时没有恢复码. */
+static uint8_t locked_screen(uint8_t allow_recovery)
 {
     uint8_t wraps = 0;
-    uint8_t prev_tima;
+    uint8_t prev_tima, prev = 0;
 
     screen_clear();
     put_str(2, 4, "SYSTEM LOCKED");
     put_str(2, 6, "VAULT SEALED");
-    put_str(1, 9, "HOLD A+B+SEL+START");
-    put_str(1, 10, "3 SECONDS TO WIPE");
-    put_str(1, 12, "OR POWER OFF");
-    put_str(1, 15, "RECOVERY ERASES ALL");
+    if (allow_recovery) put_str(2, 9, "SELECT=RECOVERY");
+    else                put_str(0, 9, "RECOVERY UNAVAILABLE");
+    put_str(1, 11, "HOLD A+B+SEL+START");
+    put_str(1, 12, "3 SECONDS TO WIPE");
+    put_str(1, 14, "OR POWER OFF");
+    put_str(0, 16, "WIPE ERASES ALL DATA");
     /* 纯 joypad 忙轮询, 不依赖 HALT/中断/画面采样。
      * 长按计时: 硬件定时器 TIMA @4096Hz (每 1024 周期 +1, 真机与
      * 模拟器周期一致), 8 位回绕一次 = 256 tick ≈ 62.5ms,
@@ -2449,19 +2852,28 @@ static void locked_screen(void)
         uint8_t j = joypad();
         uint8_t t = TIMA_REG;
 
+        /* SELECT 单独按下 = 进入恢复码输入; 不干扰四键擦除组合. */
+        if (allow_recovery && (j & J_SELECT) &&
+            !(j & (J_A | J_B | J_START)) && !(prev & J_SELECT)) {
+            TAC_REG = TACF_STOP;
+            waitpadup();
+            return 1;
+        }
+
         if ((j & (J_A | J_B | J_SELECT | J_START)) == (J_A | J_B | J_SELECT | J_START)) {
             if (t < prev_tima) {            /* TIMA 8 位回绕 = 256 tick */
                 if (++wraps >= 48) {
                     TAC_REG = TACF_STOP;    /* 先关定时器再擦除 */
                     vault_wipe();
                     toast("VAULT WIPED");
-                    return;
+                    return 0;
                 }
             }
         } else {
             wraps = 0;
         }
         prev_tima = t;
+        prev = j;
     }
 }
 
@@ -2556,8 +2968,8 @@ static uint8_t choose_pin(void)
     uint8_t a[PIN_LEN], b[PIN_LEN], i, same;
 
     while (1) {
-        if (pin_entry("NEW PIN", a, PIN_LEN)) return 1;
-        if (pin_entry("CONFIRM PIN", b, PIN_LEN)) return 1;
+        if (pin_entry("NEW PIN", a, PIN_LEN, 0)) return 1;
+        if (pin_entry("CONFIRM PIN", b, PIN_LEN, 0)) return 1;
         same = 1;
         for (i = 0; i < PIN_LEN; i++) {
             if (a[i] != b[i]) { same = 0; break; }
@@ -2569,26 +2981,63 @@ static uint8_t choose_pin(void)
     return 0;
 }
 
-static uint8_t unlock(void)
+/* 恢复码验证通过后重设 PIN; 返回 1 = 成功解锁/新 PIN 已保存. */
+static uint8_t recovery_reset_flow(void)
 {
-    uint8_t in[PIN_LEN];
+    uint8_t code[RCV_CODE_LEN], attempts = 0;
 
-    if (tries >= 3) {
-        locked_screen();
+    if (!rcv_set) {
+        toast("NO RECOVERY CODE");
         return 0;
     }
     while (1) {
-        pin_entry("ENTER PIN", in, PIN_LEN);
+        if (code_entry(code)) return 0;
+        if (pm5_rcv_verify(code)) break;
+        toast("WRONG CODE");
+        if (++attempts >= 3) return 0;
+    }
+
+    screen_clear();
+    put_str(3, 4, "CODE ACCEPTED");
+    put_str(3, 6, "SET A NEW PIN");
+    delay(900);
+    pin_idle = 0;
+    if (choose_pin()) return 0;
+    pin_set = 1;
+    tries = 0;
+    header_save();
+    toast("PIN RESET");
+    return 1;
+}
+
+/* 三次错误后的锁定画面; 已设置恢复码时 SELECT 可进入恢复流程. */
+static uint8_t locked_recovery_loop(void)
+{
+    while (1) {
+        if (!locked_screen(rcv_set)) return 0;
+        if (recovery_reset_flow()) return 1;
+    }
+}
+
+static uint8_t unlock(void)
+{
+    uint8_t in[PIN_LEN], r;
+
+    if (tries >= 3) return locked_recovery_loop();
+    while (1) {
+        r = pin_entry("ENTER PIN", in, PIN_LEN, rcv_set);
+        if (r == 2) {
+            if (recovery_reset_flow()) return 1;
+            continue;
+        }
+        if (r == 1) return 0;
         if (pin_ok(in)) {
             if (tries) { tries = 0; header_save(); }
             return 1;
         }
         tries++;
         header_save();
-        if (tries >= 3) {
-            locked_screen();
-            return 0;
-        }
+        if (tries >= 3) return locked_recovery_loop();
         toast("WRONG PIN");
     }
 }
@@ -2609,6 +3058,7 @@ static void setup_pin(void)
     pm5_build_tables();
     header_save();
     toast("PIN SAVED");
+    recovery_offer();
 }
 
 /* 返回 1 = 输入过程中自动锁屏 (新 PIN 未保存) */
@@ -2617,7 +3067,7 @@ static uint8_t change_pin(void)
     uint8_t old[PIN_LEN];
 
     pin_idle = 1;
-    if (pin_entry("OLD PIN", old, PIN_LEN)) {
+    if (pin_entry("OLD PIN", old, PIN_LEN, 0)) {
         pin_idle = 0;
         return 1;
     }
@@ -2663,11 +3113,11 @@ static uint8_t legacy_unlock(void)
     uint8_t in[4];
 
     if (legacy_tries >= 3) {
-        locked_screen();
+        locked_screen(0);
         return 0;
     }
     while (1) {
-        pin_entry("OLD 4-DIGIT PIN", in, 4);
+        pin_entry("OLD 4-DIGIT PIN", in, 4, 0);
         if (legacy_pin_ok(in)) {
             if (legacy_tries) { legacy_tries = 0; legacy_tries_save(); }
             return 1;
@@ -2675,7 +3125,7 @@ static uint8_t legacy_unlock(void)
         legacy_tries++;
         legacy_tries_save();
         if (legacy_tries >= 3) {
-            locked_screen();
+            locked_screen(0);
             return 0;
         }
         toast("WRONG PIN");
@@ -2726,6 +3176,7 @@ static uint8_t migrate_v03(void)
         wb((uint16_t)(MIG_TMP + i), 0x00);
     }
     sram_off();
+    rcv_cache_clear();              /* 暂存区清零时高区恢复块也被清除 */
 
     pin_set = 1;
     tries = 0;
@@ -2735,8 +3186,9 @@ static uint8_t migrate_v03(void)
 
     screen_clear();
     put_str(2, 4, "SAVE UPGRADED");
-    put_str(1, 6, "V0.3.7 READY");
+    put_str(1, 6, "V0.3.7.1 READY");
     delay(1800);
+    recovery_offer();
     return 1;
 }
 
@@ -2755,9 +3207,73 @@ static uint8_t migrate_v04(void)
 
     screen_clear();
     put_str(2, 4, "SAVE UPGRADED");
-    put_str(1, 6, "V0.3.7 READY");
+    put_str(1, 6, "V0.3.7.1 READY");
     delay(1200);
     return 1;
+}
+
+/* 设置页的恢复码子界面: 创建 / 替换 / 移除. 返回 1 = 自动锁屏. */
+static uint8_t recovery_settings(void)
+{
+    uint8_t sel = 0, k;
+
+    if (!rcv_set) {
+        screen_clear();
+        put_str(3, 1, "RECOVERY CODE");
+        draw_frame(0, 2, 20, 12);
+        put_str(4, 4, "NO CODE SET");
+        put_str(1, 6, "CREATE 12-DIGIT");
+        put_str(1, 7, "RECOVERY CODE?");
+        put_str(2, 9, "A=YES  B=NO");
+        put_str(2, 16, "B=BACK (HOLD=LOCK)");
+        k = ui_getkey_noninput(J_A | J_B);
+        if (!k) return 1;
+        if (k == KEY_LOCKED) return 1;
+        if (k & J_A) {
+            if (recovery_create_ui()) return 1;
+        }
+        return 0;
+    }
+
+    while (1) {
+        if (!rcv_set) return 0;
+        screen_clear();
+        put_str(3, 1, "RECOVERY CODE");
+        draw_frame(0, 2, 20, 12);
+        put_fixed(2, 4, "REPLACE CODE", 12, (uint8_t)(sel == 0));
+        put_fixed(2, 6, "REMOVE CODE", 11, (uint8_t)(sel == 1));
+        put_str(3, 9, "CODE IS ACTIVE");
+        put_str(2, 11, "A=SELECT B=BACK");
+        put_str(2, 16, "B=BACK (HOLD=LOCK)");
+
+        k = ui_getkey_noninput(J_UP | J_DOWN | J_A | J_B);
+        if (!k) return 1;
+        if (k == KEY_LOCKED) return 1;
+        if (k & J_B) return 0;
+        if (k & J_UP)   { sel = 0; continue; }
+        if (k & J_DOWN) { sel = 1; continue; }
+
+        if (k & J_A) {
+            if (sel == 0) {
+                if (recovery_create_ui()) return 1;
+            } else {
+                screen_clear();
+                draw_frame(0, 2, 20, 12);
+                put_str(2, 4, "REMOVE RECOVERY");
+                put_str(4, 5, "CODE?");
+                put_str(1, 7, "YOU CAN STILL USE");
+                put_str(1, 8, "YOUR PIN");
+                put_str(2, 10, "A=YES  B=NO");
+                k = ui_getkey_noninput(J_A | J_B);
+                if (!k) return 1;
+                if (k == KEY_LOCKED) return 1;
+                if (k & J_A) {
+                    pm5_rcv_clear();
+                    toast("RECOVERY REMOVED");
+                }
+            }
+        }
+    }
 }
 
 static uint8_t settings_screen(void)
@@ -2772,12 +3288,14 @@ static uint8_t settings_screen(void)
         put_fixed(1, 4, "PASSWORD LENGTH", 15, (uint8_t)(sel == 0));
         put_fixed(1, 6, "SYMBOLS", 7, (uint8_t)(sel == 1));
         put_fixed(1, 8, "AUTO-LOCK", 9, (uint8_t)(sel == 2));
+        put_fixed(1, 10, "RECOVERY CODE", 13, (uint8_t)(sel == 3));
 
         v[0] = (char)('0' + GEN_LENS[gen_idx] / 10);
         v[1] = (char)('0' + GEN_LENS[gen_idx] % 10);
         v[2] = 0;
         put_str(17, 4, v);
         put_str(16, 6, gen_sym ? "ON" : "OFF");
+        put_str(16, 10, rcv_set ? "ON" : "OFF");
         if (LOCK_MINS[lock_idx] >= 10) {
             put_str(13, 8, "10 MIN");
         } else {
@@ -2794,20 +3312,34 @@ static uint8_t settings_screen(void)
         if (k == KEY_LOCKED) return 1;
         if (k & J_B) return 0;
         if (k & J_UP)   { if (sel) sel--; continue; }
-        if (k & J_DOWN) { if (sel < 2) sel++; continue; }
+        if (k & J_DOWN) { if (sel < 3) sel++; continue; }
 
-        if (k & (J_A | J_RIGHT)) {
+        if (k & J_A) {
+            if (sel == 3) {
+                if (recovery_settings()) return 1;
+                continue;
+            }
             if (sel == 0) gen_idx = (uint8_t)((gen_idx + 1) & 3);
             else if (sel == 1) gen_sym = (uint8_t)(!gen_sym);
             else lock_idx = (uint8_t)((lock_idx + 1) % 5);
             settings_save();
             if (sel == 2) idle_reset();
+        } else if (k & J_RIGHT) {
+            if (sel == 0) gen_idx = (uint8_t)((gen_idx + 1) & 3);
+            else if (sel == 1) gen_sym = (uint8_t)(!gen_sym);
+            else if (sel == 2) lock_idx = (uint8_t)((lock_idx + 1) % 5);
+            if (sel < 3) {
+                settings_save();
+                if (sel == 2) idle_reset();
+            }
         } else if (k & J_LEFT) {
             if (sel == 0) gen_idx = (uint8_t)((gen_idx + 3) & 3);
             else if (sel == 1) gen_sym = (uint8_t)(!gen_sym);
-            else lock_idx = (uint8_t)((lock_idx + 4) % 5);
-            settings_save();
-            if (sel == 2) idle_reset();
+            else if (sel == 2) lock_idx = (uint8_t)((lock_idx + 4) % 5);
+            if (sel < 3) {
+                settings_save();
+                if (sel == 2) idle_reset();
+            }
         }
     }
 }
@@ -2897,7 +3429,7 @@ void main(void)
     put_tile(9, 2, 254);
     put_str(4, 3, "GB PASSWORD");
     put_str(7, 5, "VAULT");
-    put_str(7, 8, "V0.3.7");
+    put_str(6, 8, "V0.3.7.1");
     put_str(4, 11, "PRESS START");
     put_str(1, 16, "BATTERY CART NEEDED");
     getkey(J_START);

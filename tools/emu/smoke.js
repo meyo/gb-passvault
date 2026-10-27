@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * smoke.js - GB Password Vault v0.3.7 无头冒烟测试 (serverboy)
+ * smoke.js - GB Password Vault v0.3.7.1 无头冒烟测试 (serverboy)
  *
  * 通过模拟器按键驱动完整流程, 断言:
  *   - 屏幕文本 (读 serverboy 的 DMG tilemap buffer, 等于画面实际内容)
@@ -12,7 +12,8 @@
  * 关键点 2: serverboy 每帧结束强制松键, "按住 N 帧"对 waitpad 型界面等于按 N 次。
  *           -> tap = 单帧点按 (一次输入); hold = 连续帧按住 (仅 joypad 轮询界面用)。
  * 关键点 3: 存档为 32KB (MBC1 4 x 8KB 存储体), 平面地址 = 体号 * 8192 + 体内偏移。
- *           v0.3.7 低区仍 16 + i*80；高区 0x54D0 起为 PMG5 双头/CRC/WAL。
+ *           v0.3.7/v0.3.7.1 低区仍 16 + i*80；高区 0x54D0 起为 PMG5 双头/CRC/WAL；
+ *           v0.3.7.1 在 0x5730/0x5750 增加恢复码 hash 双块。
  * 注意: serverboy 对 DMG 的 VRAM 建模: tilemap (0x9800) 在 core.BGCHRBank1
  */
 const fs = require('fs');
@@ -197,12 +198,11 @@ function padHighlighted(c, r) {
     return t >= 96 && t < 192;
 }
 
-function enterPin(pin) {
-    const width = pin.length;
+function enterDigits(seq, fieldShown) {
     let cur = { r: 0, c: 0 };
     const digits = [];
-    for (let i = 0; i < pin.length; i++) {
-        const t = padPos(+pin[i]);
+    for (let i = 0; i < seq.length; i++) {
+        const t = padPos(+seq[i]);
         const moves = [];
         while (cur.r < t.r) { cur = { r: cur.r + 1, c: cur.c }; moves.push(['DOWN', cur]); }
         while (cur.r > t.r) { cur = { r: cur.r - 1, c: cur.c }; moves.push(['UP', cur]); }
@@ -210,13 +210,13 @@ function enterPin(pin) {
         while (cur.c > t.c) { cur = { r: cur.r, c: cur.c - 1 }; moves.push(['LEFT', cur]); }
         for (const [key, hl] of moves) {
             if (!tapUntil(key, () => padHighlighted(hl.c, hl.r), 60, 5)) {
-                throw new Error('PIN 光标未移动 (' + key + ' -> ' + hl.c + ',' + hl.r + ')');
+                throw new Error('数字光标未移动 (' + key + ' -> ' + hl.c + ',' + hl.r + ')');
             }
         }
-        digits.push(pin[i]);
-        if (i < pin.length - 1) {
-            if (!tapUntil('A', () => pinFieldShown(digits.join(''), width), 60, 5)) {
-                throw new Error('PIN 字段未显示 ' + digits.join(''));
+        digits.push(seq[i]);
+        if (i < seq.length - 1) {
+            if (!tapUntil('A', () => fieldShown(digits.join('')), 60, 5)) {
+                throw new Error('数字字段未显示 ' + digits.join(''));
             }
         } else {
             /* 最后一击可能被绘制/延时吞掉: 屏幕有任何变化即视为已提交 */
@@ -227,6 +227,42 @@ function enterPin(pin) {
             }
         }
     }
+}
+function enterPin(pin) { enterDigits(pin, d => pinFieldShown(d, pin.length)); }
+
+/* 恢复码字段: 14 字符, 4-4-4 分组, 未输入位显示 '_' */
+function codeFieldShown(digits) {
+    let exp = '';
+    for (let i = 0; i < 12; i++) {
+        if (i === 4 || i === 8) exp += ' ';
+        exp += i < digits.length ? digits[i] : '_';
+    }
+    return rowText(3).slice(3, 17) === exp;
+}
+function codeScreenReady() {
+    return rowText(0).includes('SECRET VAULT')
+        && rowText(1).includes('RECOVERY CODE')
+        && rowText(2).includes('ENTER 12 DIGITS')
+        && codeFieldShown('')
+        && rowText(15).includes('CLR')
+        && rowText(15).includes('OK');
+}
+function enterCode(code) { enterDigits(code, d => codeFieldShown(d)); }
+function displayedRecoveryCode() {
+    const m = rowText(6).match(/(\d{4}) (\d{4}) (\d{4})/);
+    return m ? m[1] + m[2] + m[3] : null;
+}
+function recoveryCodeShown() {
+    return rowText(3).includes('YOUR RECOVERY')
+        && rowText(4).includes('CODE')
+        && /^\d{4} \d{4} \d{4}$/.test(rowText(6).trim())
+        && rowText(8).includes('WRITE IT DOWN')
+        && rowText(13).includes('A=SAVE');
+}
+function recoverySubReady() {
+    return rowText(1).includes('RECOVERY CODE')
+        && rowText(9).includes('CODE IS ACTIVE')
+        && recoverySubSel() >= 0;
 }
 
 /* ============ 虚拟键盘 v2 (三模式: 大写 / 小写 / 符号页) ============ */
@@ -371,7 +407,24 @@ function typeMore(title, initial, text, doneVerify) {
 
 /* ============ 菜单 / 列表 ============ */
 function menuSel() { for (let i = 0; i < 6; i++) if (tileAt(2, 3 + i * 2) >= 96) return i; return -1; }
-function settingsSel() { for (let i = 0; i < 3; i++) if (tileAt(1, 4 + i * 2) >= 96) return i; return -1; }
+function settingsSel() { for (let i = 0; i < 4; i++) if (tileAt(1, 4 + i * 2) >= 96) return i; return -1; }
+function settingsGoto(i) {
+    if (!waitUntil(() => settingsSel() >= 0, 400)) throw new Error('设置高亮未找到');
+    let cur = settingsSel();
+    while (cur < i) {
+        if (!tapUntil('DOWN', () => settingsSel() === cur + 1, 80, 5)) throw new Error('设置未下移');
+        cur++;
+    }
+    while (cur > i) {
+        if (!tapUntil('UP', () => settingsSel() === cur - 1, 80, 5)) throw new Error('设置未上移');
+        cur--;
+    }
+}
+function recoverySubSel() {
+    if (tileAt(2, 4) >= 96) return 0;
+    if (tileAt(2, 6) >= 96) return 1;
+    return -1;
+}
 function binChecksumOk(s) {
     if (String.fromCharCode(s[20416], s[20417], s[20418], s[20419]) !== 'BIN1') return false;
     let c = 0xA5 ^ s[20420];
@@ -443,6 +496,9 @@ const PM5_HDR_A = 0x54D0;
 const PM5_HDR_B = 0x54F0;
 const PM5_REC_CRC = 0x5510;
 const PM5_BIN_CRC = 0x5710;
+const PM5_RCV_A = 0x5730;
+const PM5_RCV_B = 0x5750;
+const PM5_RCV_SIZE = 20;
 const PM5_WAL = 0x5800;
 const PM5_WAL_MAX = 256;
 
@@ -468,6 +524,36 @@ function pm5Hdr(s, addr) {
         if (i !== 8 && i !== 9) c = crc16Update(c, b[addr + i]);
     if (c !== rd16(b, addr + 8)) return null;
     return { seq: rd16(b, addr + 6), crc: c };
+}
+function rcvBlock(s, addr) {
+    const b = Buffer.isBuffer(s) ? s : Buffer.from(s);
+    if (b.toString('latin1', addr, addr + 4) !== 'RCV1') return null;
+    if (b[addr + 4] !== 1) return null;
+    let c = 0xFFFF;
+    for (let i = 0; i < 16; i++) c = crc16Update(c, b[addr + i]);
+    if (c !== rd16(b, addr + 16)) return null;
+    return {
+        seq: rd16(b, addr + 6),
+        present: (b[addr + 5] & 1) !== 0,
+        flags: b[addr + 5],
+        hash: Buffer.from(b.slice(addr + 8, addr + 16))
+    };
+}
+/* 镜像 ROM: 两个 32 位 FNV-1a 变体拼接成 64-bit 恢复码 hash */
+function recoveryHash(code) {
+    let h1 = 2166136261 >>> 0;
+    let h2 = (2166136261 ^ 0x9E3779B9) >>> 0;
+    for (let i = 0; i < 12; i++) {
+        const d = (code.charCodeAt(i) - 48 + 1) & 0xFF;
+        h1 = Math.imul(h1 ^ d, 16777619) >>> 0;
+        h2 = Math.imul(h2 ^ ((d ^ 0x5A) & 0xFF), 16777619) >>> 0;
+    }
+    h1 = (h1 ^ 0x504D4735) >>> 0;
+    h2 = (h2 ^ 0x52435631) >>> 0;
+    return Buffer.from([
+        h1 & 0xFF, (h1 >>> 8) & 0xFF, (h1 >>> 16) & 0xFF, (h1 >>> 24) & 0xFF,
+        h2 & 0xFF, (h2 >>> 8) & 0xFF, (h2 >>> 16) & 0xFF, (h2 >>> 24) & 0xFF
+    ]);
 }
 function pm5RecCrc(s, i) { return crc16Buf(s.slice(16 + i * REC_SZ, 16 + (i + 1) * REC_SZ)); }
 function setRec(s, i, label, user, pass) {
@@ -556,7 +642,7 @@ try {
     waitOk(() => screenText().includes('PRESS START'), '标题画面出现 PRESS START');
     dump('01-title');
     ok(screenText().includes('GB PASSWORD'), '标题文字 GB PASSWORD');
-    ok(screenText().includes('V0.3.7'), '标题版本 V0.3.7');
+    ok(screenText().includes('V0.3.7.1'), '标题版本 V0.3.7.1');
 
     if (!tapUntil('START', () => pinScreenReady('NEW PIN', 6), 300, 8)) throw new Error('无法进入设置 PIN 画面');
     ok(true, '进入设置 6 位 PIN 画面');
@@ -584,7 +670,18 @@ try {
     enterPin('123456');
     waitOk(() => pinScreenReady('CONFIRM PIN', 6), '进入确认 PIN 画面');
     enterPin('123456');
-    waitOk(() => screenText().includes('VAULT MENU'), '设置完成进入主菜单');
+    waitOk(() => rowText(9).trim() === 'PIN SAVED', '确认 PIN 后显示居中 PIN SAVED 提示');
+    ok(tileAt(3, 8) === 192 && tileAt(15, 8) === 194, '提示条顶部为 9-slice 长方形边框');
+    ok(tileAt(3, 9) === 195 && tileAt(15, 9) === 197, '提示条左右边框完整');
+    ok(tileAt(3, 10) === 198 && tileAt(15, 10) === 200, '提示条底部为 9-slice 长方形边框');
+    ok(rowText(9).trim() === 'PIN SAVED', '提示文字位于屏幕中央 label 内 (第 9 行)');
+    if (!waitUntil(() => screenText().includes('RECOVERY CODE?'), 300)) throw new Error('流程 A: 设置后未出现恢复码提示');
+    ok(rowText(5).includes('ADD 12-DIGIT') && rowText(6).includes('RECOVERY CODE?'), '设置完成后可选生成 12 位恢复码');
+    let noRcv = sram();
+    ok(rcvBlock(noRcv, PM5_RCV_A) === null && rcvBlock(noRcv, PM5_RCV_B) === null,
+        '跳过恢复码时高区扩展块为空');
+    if (!tapUntil('B', () => screenText().includes('VAULT MENU'), 300, 8)) throw new Error('流程 A: 跳过恢复码后未进入主菜单');
+    ok(true, '跳过恢复码后进入主菜单');
     dump('03-menu');
 
     let s = sram();
@@ -1075,7 +1172,10 @@ try {
     enterPin('654321');
     waitOk(() => pinScreenReady('CONFIRM PIN', 6), '迁移: 进入新 PIN 确认画面');
     enterPin('654321');
-    waitOk(() => screenText().includes('VAULT MENU'), '迁移完成并直接进入主菜单', 3000);
+    waitOk(() => screenText().includes('RECOVERY CODE?'), '迁移完成显示可选恢复码提示', 3000);
+    ok(rowText(5).includes('ADD 12-DIGIT') && rowText(6).includes('RECOVERY CODE?'), 'PMG3 迁移完成后可创建恢复码');
+    if (!tapUntil('B', () => screenText().includes('VAULT MENU'), 300, 8)) throw new Error('迁移: 跳过恢复码后未进入主菜单');
+    ok(true, '迁移完成并跳过恢复码进入主菜单');
     dump('20-migrated-menu');
 
     s = sram();
@@ -1086,6 +1186,8 @@ try {
     ok((s[12] & 1) === 1, '迁移后 PIN 标志 = 1');
     ok(checksumOk(s), '迁移后新布局校验和正确');
     ok(pm5Hdr(s, PM5_HDR_A) && pm5Hdr(s, PM5_HDR_B), 'PMG3 迁移后 PMG5 双头有效');
+    ok(rcvBlock(s, PM5_RCV_A) === null && rcvBlock(s, PM5_RCV_B) === null,
+        'PMG3 迁移跳过恢复码时高区扩展块为空');
     ok(pm5RecCrc(s, 0) === rd16(s, PM5_REC_CRC) && pm5RecCrc(s, 1) === rd16(s, PM5_REC_CRC + 2),
         'PMG3 迁移后槽位 CRC 表有效');
     const m0 = recOf(s, 0), m1 = recOf(s, 1), m2 = recOf(s, 2);
@@ -1355,8 +1457,7 @@ try {
         ok(rowText(16).includes('SEL=USER'), 'v0.3.1 旧档列表默认标签视图');
     }
 
-    console.log('== 流程 G: 回收站单条永久删除 + START 清空 ==');
-    {
+    console.log('== 流程 G: 回收站单条永久删除 + START 清空 ==');    {
         boot(buildSyntheticSave(3));
         if (!tapUntil('START', () => pinScreenReady('ENTER PIN', 6), 300, 8)) throw new Error('流程 G: 未进入解锁');
         enterPin('123456');
@@ -1400,6 +1501,207 @@ try {
         }
         ok(binChecksumOk(s), '流程 G: 清空后回收站校验和正确');
         ok(checksumOk(s), '流程 G: 回收站操作不影响主库校验和');
+    }
+
+    console.log();
+    console.log('== 流程 R: 12 位恢复码 (创建/校验/重设/替换/锁定恢复/移除) ==');
+    {
+        /* --- R1: 设置页创建恢复码, 只写 hash 双块 --- */
+        boot(save1);
+        if (!tapUntil('START', () => pinScreenReady('ENTER PIN', 6), 300, 8)) throw new Error('流程 R: 未进入解锁');
+        enterPin('123456');
+        waitOk(() => screenText().includes('VAULT MENU'), '流程 R: 解锁进入菜单');
+        menuGoto(5);
+        if (!tapUntil('A', () => rowText(1).includes('SETTINGS') && settingsSel() === 0
+            && rowText(10).includes('RECOVERY CODE') && rowText(10).includes('OFF'), 200, 6)) {
+            throw new Error('流程 R: 未进入设置');
+        }
+        ok(rowText(10).includes('RECOVERY CODE') && rowText(10).includes('OFF'), '流程 R: 初始恢复码状态 OFF');
+        settingsGoto(3);
+        if (!tapUntil('A', () => screenText().includes('NO CODE SET'), 200, 6)) throw new Error('流程 R: 未进入恢复码设置');
+        ok(rowText(4).includes('NO CODE SET'), '流程 R: 未设置时提示创建恢复码');
+        dump('27-recovery-none');
+        let pre = sram();
+        ok(rcvBlock(pre, PM5_RCV_A) === null && rcvBlock(pre, PM5_RCV_B) === null,
+            '流程 R: 创建前高区无恢复码块');
+
+        if (!tapUntil('A', () => recoveryCodeShown(), 300, 6)) throw new Error('流程 R: 未显示生成的恢复码');
+        const code1 = displayedRecoveryCode();
+        ok(/^\d{12}$/.test(code1 || ''), '流程 R: 生成 12 位数字恢复码');
+        ok(rowText(6).includes(code1.slice(0, 4) + ' ' + code1.slice(4, 8) + ' ' + code1.slice(8)),
+            '流程 R: 恢复码按 4-4-4 分组显示');
+        dump('28-recovery-code');
+        pre = sram();
+        ok(rcvBlock(pre, PM5_RCV_A) === null && rcvBlock(pre, PM5_RCV_B) === null,
+            '流程 R: 按 A 保存前不写入 hash');
+        if (!tapUntil('A', () => rowText(1).includes('SETTINGS') && rowText(10).includes('ON'), 600, 4)) {
+            throw new Error('流程 R: 保存恢复码后未返回设置');
+        }
+        ok(true, '流程 R: 保存后返回设置且状态 ON');
+        let sr = sram();
+        const ra = rcvBlock(sr, PM5_RCV_A), rb = rcvBlock(sr, PM5_RCV_B);
+        ok(ra && rb, '流程 R: 双份 RCV1 块 CRC16 有效');
+        ok(ra && rb && ra.present && rb.present, '流程 R: 双块均标记恢复码已设置');
+        ok(ra && rb && ra.seq === rb.seq && ra.seq > 0, '流程 R: 双块序列号一致且非 0');
+        const hash1 = recoveryHash(code1);
+        ok(ra && ra.hash.equals(hash1) && rb && rb.hash.equals(hash1),
+            '流程 R: 双块 64-bit hash 与恢复码匹配');
+        let plainFound = false;
+        for (let i = PM5_RCV_A; i < PM5_RCV_B + PM5_RCV_SIZE; i++) {
+            if (sr.toString('latin1', i, i + 12) === code1) { plainFound = true; break; }
+        }
+        ok(!plainFound, '流程 R: 扩展块中不保存恢复码明文');
+        ok(sr[PM5_WAL] !== 0xA5, '流程 R: 创建恢复码后 WAL 已清空');
+        ok(checksumOk(sr), '流程 R: 创建恢复码不影响低区校验和');
+        let saveR = Buffer.from(sr);
+
+        /* --- R2: PIN 画面 SELECT -> 错误码拒绝 -> 正确码重设 PIN --- */
+        boot(saveR);
+        if (!tapUntil('START', () => pinScreenReady('ENTER PIN', 6), 300, 8)) throw new Error('流程 R: 重启未进入解锁');
+        ok(waitUntil(() => rowText(17).includes('SEL=RECOVERY'), 60), '流程 R: 已设置恢复码时 PIN 画面提供 SELECT');
+        if (!tapUntil('SELECT', () => codeScreenReady(), 300, 6)) throw new Error('流程 R: SELECT 未进入恢复码输入');
+        ok(true, '流程 R: PIN 画面 SELECT 进入恢复码输入');
+        dump('29-recovery-entry');
+        const badCode = code1 === '000000000000' ? '000000000001' : '000000000000';
+        enterCode(badCode);
+        ok(waitUntil(() => screenText().includes('WRONG CODE'), 300), '流程 R: 错误恢复码显示 WRONG CODE');
+        ok(waitUntil(() => codeScreenReady(), 300), '流程 R: 错误恢复码后重新显示输入画面');
+        enterCode(code1);
+        ok(waitUntil(() => screenText().includes('CODE ACCEPTED') && screenText().includes('SET A NEW PIN'), 500),
+            '流程 R: 正确恢复码被接受并要求新 PIN');
+        if (!waitUntil(() => pinScreenReady('NEW PIN', 6), 500)) throw new Error('流程 R: 未进入新 PIN');
+        enterPin('111111');
+        waitOk(() => pinScreenReady('CONFIRM PIN', 6), '流程 R: 进入确认新 PIN');
+        enterPin('111111');
+        waitOk(() => screenText().includes('VAULT MENU'), '流程 R: 恢复码重设 PIN 后进入主菜单', 1500);
+        sr = sram();
+        ok(sr[4] === 8 && sr[5] === 8 && sr[6] === 8 && sr[7] === 8 && sr[8] === 8 && sr[9] === 8,
+            '流程 R: 新 PIN 111111 混淆存储');
+        ok(sr[10] === 0, '流程 R: 恢复后错误次数清零');
+        const r2a = rcvBlock(sr, PM5_RCV_A);
+        ok(r2a && r2a.seq === ra.seq && r2a.hash.equals(hash1), '流程 R: 重设 PIN 不改变恢复码块');
+        saveR = Buffer.from(sr);
+
+        /* --- R3: 旧 PIN 失效; 设置内替换恢复码 --- */
+        boot(saveR);
+        if (!tapUntil('START', () => pinScreenReady('ENTER PIN', 6), 300, 8)) throw new Error('流程 R: R3 未进入解锁');
+        enterPin('123456');
+        ok(waitUntil(() => screenText().includes('WRONG PIN'), 400), '流程 R: 恢复后旧 PIN 123456 被拒绝');
+        if (!waitUntil(() => pinScreenReady('ENTER PIN', 6), 300)) throw new Error('流程 R: 旧 PIN 拒绝后未回解锁');
+        enterPin('111111');
+        waitOk(() => screenText().includes('VAULT MENU'), '流程 R: 恢复后的新 PIN 可解锁');
+        menuGoto(5);
+        if (!tapUntil('A', () => rowText(1).includes('SETTINGS') && settingsSel() === 0, 200, 6)) throw new Error('流程 R: R3 未进入设置');
+        settingsGoto(3);
+        if (!tapUntil('A', () => recoverySubReady(), 300, 6)) throw new Error('流程 R: 未进入恢复码子菜单');
+        ok(rowText(4).includes('REPLACE CODE') && rowText(6).includes('REMOVE CODE'),
+            '流程 R: 已设置时提供替换/移除');
+        dump('30-recovery-active');
+        if (!tapUntil('A', () => recoveryCodeShown(), 300, 6)) throw new Error('流程 R: 替换时未生成新码');
+        const code2 = displayedRecoveryCode();
+        ok(/^\d{12}$/.test(code2 || ''), '流程 R: 替换时生成新的 12 位恢复码');
+        tap('A');
+        ok(waitUntil(() => rowText(9).includes('CODE SAVED'), 150), '流程 R: 替换保存后显示 CODE SAVED');
+        if (!waitUntil(() => recoverySubReady(), 800)) throw new Error('流程 R: 替换保存后未回子菜单');
+        const seq1 = r2a.seq;
+        sr = sram();
+        const r3a = rcvBlock(sr, PM5_RCV_A), r3b = rcvBlock(sr, PM5_RCV_B);
+        ok(r3a && r3b && r3a.seq === r3b.seq && r3a.seq === ((seq1 + 1) & 0xFFFF),
+            '流程 R: 替换后双块序列号递增');
+        ok(r3a && r3b && r3a.hash.equals(recoveryHash(code2)) && r3b.hash.equals(recoveryHash(code2)),
+            '流程 R: 替换后 hash 对应新恢复码');
+        ok(sr[PM5_WAL] !== 0xA5, '流程 R: 替换恢复码后 WAL 已清空');
+        saveR = Buffer.from(sr);
+
+        /* --- R4: 替换后旧码失效, 新码可用; SELECT 取消返回 PIN --- */
+        boot(saveR);
+        if (!tapUntil('START', () => pinScreenReady('ENTER PIN', 6), 300, 8)) throw new Error('流程 R: R4 未进入解锁');
+        if (!tapUntil('SELECT', () => codeScreenReady(), 300, 6)) throw new Error('流程 R: R4 未进入恢复码输入');
+        enterCode(code1);
+        ok(waitUntil(() => screenText().includes('WRONG CODE'), 400), '流程 R: 替换后旧恢复码被拒绝');
+        if (!waitUntil(() => codeScreenReady(), 400)) throw new Error('流程 R: 旧码拒绝后未回输入画面');
+        if (!tapUntil('SELECT', () => pinScreenReady('ENTER PIN', 6), 300, 6)) throw new Error('流程 R: 恢复码画面 SELECT 未返回 PIN');
+        ok(waitUntil(() => rowText(17).includes('SEL=RECOVERY'), 60), '流程 R: 取消恢复码输入返回 PIN 画面');
+        if (!tapUntil('SELECT', () => codeScreenReady(), 300, 6)) throw new Error('流程 R: R4 再次未进入恢复码输入');
+        enterCode(code2);
+        if (!waitUntil(() => screenText().includes('CODE ACCEPTED'), 500)) throw new Error('流程 R: 新恢复码未被接受');
+        if (!waitUntil(() => pinScreenReady('NEW PIN', 6), 500)) throw new Error('流程 R: R4 未进入新 PIN');
+        enterPin('222222');
+        waitOk(() => pinScreenReady('CONFIRM PIN', 6), '流程 R: 新码恢复进入确认 PIN');
+        enterPin('222222');
+        waitOk(() => screenText().includes('VAULT MENU'), '流程 R: 新恢复码重设 PIN 后进入主菜单', 1500);
+        sr = sram();
+        ok(sr[4] === 9 && sr[5] === 9 && sr[6] === 9 && sr[7] === 9 && sr[8] === 9 && sr[9] === 9,
+            '流程 R: 新码恢复的 PIN 222222 混淆存储');
+        saveR = Buffer.from(sr);
+
+        /* --- R5: 三次错误锁定后 SELECT 仍可用恢复码 --- */
+        boot(saveR);
+        if (!tapUntil('START', () => pinScreenReady('ENTER PIN', 6), 300, 8)) throw new Error('流程 R: R5 未进入解锁');
+        for (let i = 0; i < 3; i++) {
+            enterPin('000000');
+            if (i < 2) waitOk(() => pinScreenReady('ENTER PIN', 6), '流程 R: 错误 PIN ' + (i + 1) + ' 次后回到解锁');
+        }
+        waitOk(() => screenText().includes('SYSTEM LOCKED'), '流程 R: 三次错误进入 SYSTEM LOCKED', 900);
+        ok(waitUntil(() => rowText(9).includes('SELECT=RECOVERY') && !rowText(9).includes('UNAVAILABLE'), 60),
+            '流程 R: 锁定画面提供 SELECT 恢复');
+        dump('31-recovery-locked');
+        if (!tapUntil('SELECT', () => codeScreenReady(), 300, 6)) throw new Error('流程 R: 锁定画面 SELECT 未进入恢复');
+        enterCode(code2);
+        if (!waitUntil(() => screenText().includes('CODE ACCEPTED'), 500)) throw new Error('流程 R: 锁定恢复码未被接受');
+        if (!waitUntil(() => pinScreenReady('NEW PIN', 6), 500)) throw new Error('流程 R: R5 未进入新 PIN');
+        enterPin('123456');
+        waitOk(() => pinScreenReady('CONFIRM PIN', 6), '流程 R: 锁定恢复进入确认 PIN');
+        enterPin('123456');
+        waitOk(() => screenText().includes('VAULT MENU'), '流程 R: 锁定画面恢复码重设 PIN 成功', 1500);
+        sr = sram();
+        ok(sr[4] === 8 && sr[5] === 9 && sr[6] === 0 && sr[7] === 1 && sr[8] === 2 && sr[9] === 3 && sr[10] === 0,
+            '流程 R: 锁定恢复后 PIN=123456 且错误次数清零');
+        saveR = Buffer.from(sr);
+
+        /* --- R6: 设置内移除恢复码 -> 双块标记未设置 --- */
+        boot(saveR);
+        if (!tapUntil('START', () => pinScreenReady('ENTER PIN', 6), 300, 8)) throw new Error('流程 R: R6 未进入解锁');
+        enterPin('123456');
+        waitOk(() => screenText().includes('VAULT MENU'), '流程 R: 移除前 PIN 解锁');
+        menuGoto(5);
+        if (!tapUntil('A', () => rowText(1).includes('SETTINGS') && settingsSel() === 0, 200, 6)) throw new Error('流程 R: R6 未进入设置');
+        settingsGoto(3);
+        if (!tapUntil('A', () => recoverySubReady(), 300, 6)) throw new Error('流程 R: R6 未进入恢复码子菜单');
+        if (!tapUntil('DOWN', () => recoverySubSel() === 1, 100, 5)) throw new Error('流程 R: 未移到移除项');
+        if (!tapUntil('A', () => screenText().includes('REMOVE RECOVERY'), 300, 6)) throw new Error('流程 R: 未进入移除确认');
+        ok(rowText(4).includes('REMOVE RECOVERY') && rowText(5).includes('CODE?'),
+            '流程 R: 移除恢复码需要确认');
+        tap('A');
+        ok(waitUntil(() => rowText(9).includes('RECOVERY REMOVED'), 200), '流程 R: 移除后显示 RECOVERY REMOVED');
+        if (!waitUntil(() => rowText(1).includes('SETTINGS') && rowText(10).includes('OFF'), 1000)) {
+            throw new Error('流程 R: 移除后未返回设置');
+        }
+        sr = sram();
+        const r6a = rcvBlock(sr, PM5_RCV_A), r6b = rcvBlock(sr, PM5_RCV_B);
+        ok(r6a && r6b && !r6a.present && !r6b.present, '流程 R: 移除后双块有效但标记未设置');
+        const seq2 = r3a.seq;
+        ok(r6a && r6b && r6a.seq === r6b.seq && r6a.seq === ((seq2 + 1) & 0xFFFF),
+            '流程 R: 移除后序列号递增');
+        ok(sr[PM5_WAL] !== 0xA5, '流程 R: 移除恢复码后 WAL 已清空');
+        saveR = Buffer.from(sr);
+
+        /* --- R7: 移除后重启: PIN 画面无 SELECT, 锁定画面提示不可用 --- */
+        boot(saveR);
+        if (!tapUntil('START', () => pinScreenReady('ENTER PIN', 6), 300, 8)) throw new Error('流程 R: R7 未进入解锁');
+        ok(waitUntil(() => rowText(17).includes('B=DEL') && !rowText(17).includes('RECOVERY'), 60),
+            '流程 R: 移除后 PIN 画面不再显示 SELECT 恢复');
+        tap('SELECT');
+        frames(10);
+        ok(pinScreenReady('ENTER PIN', 6), '流程 R: 移除后按 SELECT 不进入恢复界面');
+        for (let i = 0; i < 3; i++) {
+            enterPin('000000');
+            if (i < 2) waitOk(() => pinScreenReady('ENTER PIN', 6), '流程 R: 移除后错误 PIN ' + (i + 1) + ' 次后回到解锁');
+        }
+        waitOk(() => screenText().includes('SYSTEM LOCKED'), '流程 R: 移除后三次错误仍进入锁定画面', 900);
+        ok(waitUntil(() => rowText(9).includes('RECOVERY UNAVAILABLE'), 60),
+            '流程 R: 未设置恢复码时锁定画面提示 RECOVERY UNAVAILABLE');
+        dump('32-recovery-unavailable');
     }
 } catch (e) {
     fails++;
