@@ -1,5 +1,5 @@
 /*
- * GB Password Vault v0.3.7.2
+ * GB Password Vault v0.3.7.3
  * ------------------------------------------------------------------
  * 在真实 Game Boy (DMG / GBC 兼容模式 / GBA) 上运行的离线密码管理器。
  * 编译工具链: GBDK-2020 4.5.0  (C/SDCC)
@@ -3210,7 +3210,7 @@ static uint8_t migrate_v03(void)
 
     screen_clear();
     put_str(2, 4, "SAVE UPGRADED");
-    put_str(1, 6, "V0.3.7.2 READY");
+    put_str(1, 6, "V0.3.7.3 READY");
     delay(1800);
     recovery_offer();
     return 1;
@@ -3231,7 +3231,7 @@ static uint8_t migrate_v04(void)
 
     screen_clear();
     put_str(2, 4, "SAVE UPGRADED");
-    put_str(1, 6, "V0.3.7.2 READY");
+    put_str(1, 6, "V0.3.7.3 READY");
     delay(1200);
     return 1;
 }
@@ -3453,7 +3453,7 @@ void main(void)
     put_tile(9, 2, 254);
     put_str(4, 3, "GB PASSWORD");
     put_str(7, 5, "VAULT");
-    put_str(6, 8, "V0.3.7.2");
+    put_str(6, 8, "V0.3.7.3");
     put_str(4, 11, "PRESS START");
     put_str(1, 16, "BATTERY CART NEEDED");
     getkey(J_START);

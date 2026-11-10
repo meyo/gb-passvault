@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * smoke.js - GB Password Vault v0.3.7.2 无头冒烟测试 (serverboy)
+ * smoke.js - GB Password Vault v0.3.7.3 无头冒烟测试 (serverboy)
  *
  * 通过模拟器按键驱动完整流程, 断言:
  *   - 屏幕文本 (读 serverboy 的 DMG tilemap buffer, 等于画面实际内容)
@@ -14,7 +14,8 @@
  * 关键点 3: 存档为 32KB (MBC1 4 x 8KB 存储体), 平面地址 = 体号 * 8192 + 体内偏移。
  *           v0.3.7+ 低区仍 16 + i*80；高区 0x54D0 起为 PMG5 双头/CRC/WAL；
  *           v0.3.7.1 在 0x5730/0x5750 增加恢复码 hash 双块。
- *           v0.3.7.2 修正小写 g 字形、详情页按键互换、密码输入两行显示。
+ *           v0.3.7.2 修正详情页按键互换、密码输入两行显示。
+ *           v0.3.7.3 小写 g 改为 DMG 单层左勾尾字形。
  * 注意: serverboy 对 DMG 的 VRAM 建模: tilemap (0x9800) 在 core.BGCHRBank1
  */
 const fs = require('fs');
@@ -667,10 +668,11 @@ try {
     waitOk(() => screenText().includes('PRESS START'), '标题画面出现 PRESS START');
     dump('01-title');
     ok(screenText().includes('GB PASSWORD'), '标题文字 GB PASSWORD');
-    ok(screenText().includes('V0.3.7.2'), '标题版本 V0.3.7.2');
+    ok(screenText().includes('V0.3.7.3'), '标题版本 V0.3.7.3');
     const gGlyph = fontGlyph('g'), n9Glyph = fontGlyph('9');
-    ok(gGlyph[4] === 0x40 && gGlyph[5] === 0x5C && n9Glyph[3] === 0x3C && n9Glyph[4] === 0x04,
-        '小写 g 为双层字形, 与数字 9 明显区分');
+    ok(gGlyph[2] === 0x38 && gGlyph[5] === 0x3C && gGlyph[6] === 0x18 && gGlyph[7] === 0x70
+        && n9Glyph[3] === 0x3C && n9Glyph[4] === 0x04,
+        '小写 g 为 DMG 单层左勾尾, 与数字 9 / 大写 G 明显区分');
 
     if (!tapUntil('START', () => pinScreenReady('NEW PIN', 6), 300, 8)) throw new Error('无法进入设置 PIN 画面');
     ok(true, '进入设置 6 位 PIN 画面');
