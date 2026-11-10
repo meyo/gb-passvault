@@ -2,10 +2,16 @@
 
 [中文](README.md) | [English](README.en.md) | [日本語](README.ja.md)
 
+<p align="center">
+  <img src="docs/images/hardware-vault-menu.jpg" width="560" alt="GB Password Keeper running on real Game Boy hardware: VAULT MENU">
+  <br>
+  <em>实机运行画面（Game Boy DMG）：VAULT MENU</em>
+</p>
+
 > ⚠️ **项目已转向实机 ROM 路线（GBDK-2020 C 直编）**：交付物 `build/passmgr.gb`（**V0.3.7.3**，
 > 255 槽 + 20 字符标签/用户名 + 6 位 PIN + 随机密码生成器 + 32KB SRAM 存档 +
 > 回收站/自动锁屏/生成器设置 + **2bpp 图形 PIN 界面** + **PMG5 双头/CRC16/WAL 存档保护**
-> + **可选 12 位恢复码**），**356/356 自动化测试通过**；**V0.3.7.3 待真机复测**
+> + **可选 12 位恢复码**），**356/356 自动化测试通过**；**V0.3.7.3 已通过真机复测**
 > （V0.3.7.1 的 3 个问题 + V0.3.7.2 的小写 g 字形已修正）。**当前工程现状请看
 > [`docs/05-GBDK实机版实现总结.md`](docs/05-GBDK实机版实现总结.md)**。
 > 本 README 与 `docs/01~04`、`plugins/`、`assets/` 为早期 GB Studio 方案资料，仅作设计参考。

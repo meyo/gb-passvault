@@ -2,12 +2,18 @@
 
 [中文](README.md) | [English](README.en.md) | [日本語](README.ja.md)
 
+<p align="center">
+  <img src="docs/images/hardware-vault-menu.jpg" width="560" alt="GB Password Keeper running on real Game Boy hardware: VAULT MENU">
+  <br>
+  <em>Running on real hardware (Game Boy DMG): VAULT MENU</em>
+</p>
+
 > Note: The authoritative implementation summary (`docs/05`) is currently available in Chinese only.
 
 > ⚠️ **This project has moved to a real-hardware ROM path (compiled directly in C with GBDK-2020)**: the deliverable is `build/passmgr.gb` (**V0.3.7.3**,
 > 255 slots + 20-character labels/usernames + 6-digit PIN + random password generator + 32KB SRAM save +
 > recycle bin/auto-lock/generator settings + **2bpp graphical PIN screen** + **PMG5 dual-header/CRC16/WAL save protection**
-> + **optional 12-digit recovery code**), with **356/356 automated tests passing**; **V0.3.7.3 is pending real-hardware re-verification**
+> + **optional 12-digit recovery code**), with **356/356 automated tests passing**; **V0.3.7.3 has been verified on real hardware**
 > (the three issues from V0.3.7.1 and the V0.3.7.2 lowercase-g glyph are fixed). **For the current state of the project, see
 > [`docs/05-GBDK实机版实现总结.md`](docs/05-GBDK实机版实现总结.md)**.
 > This README, `docs/01~04`, `plugins/`, and `assets/` are materials from the early GB Studio approach, kept for design reference only.
