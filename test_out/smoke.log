@@ -37,11 +37,12 @@
          ^
     GB PASSWORD
        VAULT
-      V0.3.7.1
+      V0.3.7.2
     PRESS START
  BATTERY CART NEEDED
   ok   标题文字 GB PASSWORD
-  ok   标题版本 V0.3.7.1
+  ok   标题版本 V0.3.7.2
+  ok   小写 g 为双层字形, 与数字 9 明显区分
   ok   进入设置 6 位 PIN 画面
 --- 02-newpin ---
     SECRET VAULT
@@ -112,6 +113,19 @@
   ok   写入槽位后 SRAM 校验和正确
   ok   20 字符标签输入完成
   ok   20 字符小写用户名输入完成 (键盘 v2)
+--- 05a-password-36 ---
+
+ PASSWORD (MAX 36)
+ aB3!xY9#qW2$eR5%tY
+ 8&uI1(uO4)Kz6_@b?!
+  ! " # $ % & ' (
+  ) * + , - . / :
+  ; < = > ? @ [ \
+  ] ^ _ ` { | } ~
+Aa ABC SPACE  DEL OK
+ A=ADD  B=DEL
+ START=OK SEL=GEN
+  ok   36 位密码在两行输入框中完整可见
   ok   36 位混合大小写 + 符号密码输入完成并保存
 --- 05b-menu-after-mixed ---
 
@@ -130,12 +144,12 @@
   ok   写入长字段后 SRAM 校验和正确
   ok   标签 GENACC 输入完成 (第三账号)
   ok   用户名可留空 (START 直接跳过)
-  ok   密码页初始为空 (仅光标)
+  ok   密码页初始为空 (两行, 仅第一行光标)
   ok   密码页按 SELECT 生成随机密码
 --- 05c-generated-password ---
 
  PASSWORD (MAX 36)
- _c!(Eu.SC29WKD_
+ RPC#KB)6j#RV2V8Y_
   A B C D E F G H
   I J K L M N O P
   Q R S T U V W X
@@ -151,7 +165,7 @@ Aa SYM SPACE  DEL OK
   ok   生成密码长度 = 16
   ok   生成密码字符全部来自安全字符集 (无 0O1lI)
   ok   生成密码含大写/小写/数字/符号四类字符
-  ok   保存的密码与画面显示尾部一致
+  ok   16 位生成密码在两行中完整可见 (第 17 格为光标)
   ok   生成密码写入后 SRAM 校验和正确
   ok   进入账号列表
 --- 06-list ---
@@ -196,6 +210,7 @@ Aa SYM SPACE  DEL OK
  L/R=PAGE SEL=USER
  A=OPEN B=BACK
   ok   进入详情页 (SLOT 001/255)
+  ok   详情页 START=编辑 / SEL+START=删除
 --- 07-detail-masked ---
  SLOT 001/255
   LABEL:          X
@@ -205,8 +220,8 @@ Aa SYM SPACE  DEL OK
   PASS:           [
  ***
  A=REVEAL B=BACK
- SEL+START=EDIT
- START=DELETE
+ START=EDIT
+ SEL+START=DELETE
   ok   详情页标签行显示 EMAIL
   ok   详情页用户名行显示 BOB
   ok   密码默认打码 (第 7 行)
@@ -219,10 +234,10 @@ Aa SYM SPACE  DEL OK
   PASS:           [
  ABC
  A=REVEAL B=BACK
- SEL+START=EDIT
- START=DELETE
+ START=EDIT
+ SEL+START=DELETE
   ok   按住 A 显示明文 ABC
-  ok   SELECT+START 进入编辑 (标签已预填)
+  ok   START 进入编辑 (标签已预填)
   ok   标签确认后进入用户名编辑 (已预填)
   ok   用户名追加为 BOBX, 密码页已预填 ABC
   ok   编辑保存后详情页显示 BOBX
@@ -235,14 +250,14 @@ Aa SYM SPACE  DEL OK
   PASS:           [
  ***
  A=REVEAL B=BACK
- SEL+START=EDIT
- START=DELETE
+ START=EDIT
+ SEL+START=DELETE
   ok   编辑后标签保持 EMAIL
   ok   编辑后用户名 = BOBX
   ok   编辑后密码保持 ABC
   ok   编辑后 SRAM 校验和正确
   ok   编辑后记录 CRC16 已更新
-  ok   单独按 START 弹出删除确认 (组合键不影响)
+  ok   SELECT+START 弹出删除确认
   ok   取消删除后记录仍在
   ok   详情页返回列表
   ok   列表返回主菜单
@@ -384,8 +399,8 @@ WIPE ERASES ALL DATA
   PASS:           [
  ABC
  A=REVEAL B=BACK
- SEL+START=EDIT
- START=DELETE
+ START=EDIT
+ SEL+START=DELETE
   ok   断电重开后密码 ABC / 用户名 BOBX 仍在
   ok   36 位密码打码 (行7=18颗 行8=18颗)
 --- 15b-detail-long-reveal ---
@@ -398,8 +413,8 @@ WIPE ERASES ALL DATA
  aB3!xY9#qW2$eR5%tY
  8&uI1(uO4)Kz6_@b?!
  A=REVEAL B=BACK
- SEL+START=EDIT
- START=DELETE
+ START=EDIT
+ SEL+START=DELETE
   ok   按住 A 显示 36 位明文 (两行)
 
 == 流程 D: 255 槽滚动列表 + 末槽写入/删除 (合成 20 账号存档) ==
@@ -483,7 +498,7 @@ Aa SYM SPACE  DEL OK
   ok   第 255 槽起始地址 = 20336 (存储体 2)
   ok   第 255 槽位于第 3 个 8KB 存储体
   ok   跨 3 个存储体 (20416 字节) 校验和正确
-  ok   详情页 START 弹出删除确认
+  ok   详情页 SELECT+START 弹出删除确认
   ok   删除后 255 号槽恢复 EMPTY
   ok   删除后 255 号槽 used = 0
   ok   删除后 SRAM 校验和正确
@@ -812,5 +827,5 @@ RECOVERY UNAVAILABLE
 WIPE ERASES ALL DATA
 
 ==============================
-断言: 353 / 353 通过
+断言: 356 / 356 通过
 全部通过

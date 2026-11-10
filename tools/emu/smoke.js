@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * smoke.js - GB Password Vault v0.3.7.1 无头冒烟测试 (serverboy)
+ * smoke.js - GB Password Vault v0.3.7.2 无头冒烟测试 (serverboy)
  *
  * 通过模拟器按键驱动完整流程, 断言:
  *   - 屏幕文本 (读 serverboy 的 DMG tilemap buffer, 等于画面实际内容)
@@ -12,8 +12,9 @@
  * 关键点 2: serverboy 每帧结束强制松键, "按住 N 帧"对 waitpad 型界面等于按 N 次。
  *           -> tap = 单帧点按 (一次输入); hold = 连续帧按住 (仅 joypad 轮询界面用)。
  * 关键点 3: 存档为 32KB (MBC1 4 x 8KB 存储体), 平面地址 = 体号 * 8192 + 体内偏移。
- *           v0.3.7/v0.3.7.1 低区仍 16 + i*80；高区 0x54D0 起为 PMG5 双头/CRC/WAL；
+ *           v0.3.7+ 低区仍 16 + i*80；高区 0x54D0 起为 PMG5 双头/CRC/WAL；
  *           v0.3.7.1 在 0x5730/0x5750 增加恢复码 hash 双块。
+ *           v0.3.7.2 修正小写 g 字形、详情页按键互换、密码输入两行显示。
  * 注意: serverboy 对 DMG 的 VRAM 建模: tilemap (0x9800) 在 core.BGCHRBank1
  */
 const fs = require('fs');
@@ -59,6 +60,13 @@ function hold4(keys, n) {
 function chord(keys) { for (const k of keys) gb.pressKey(k); gb.doFrame(); }
 
 function tileAt(x, y) { return core.BGCHRBank1[(0x9800 + y * 32 + x) & 0x7FF]; }
+/* 读取 8x8 正常字模的低位平面 (tile 0..95 = 0x20..0x7F; DMG VRAM 0x9000 起) */
+function fontGlyph(ch) {
+    const t = ch.charCodeAt(0) - 0x20;
+    const g = [];
+    for (let r = 0; r < 8; r++) g.push(core.memory[0x9000 + t * 16 + r * 2]);
+    return g;
+}
 const TITLE_CHARS = ' SECRTVAUL';     /* tile 238..247: space, S,E,C,R,T,V,A,U,L */
 const LABEL_CHARS = '0123456789CLROK'; /* tile 223..237 */
 function mapChar(x, y) {
@@ -288,15 +296,31 @@ function kbHighlighted(row, col) { return tileAt(kbCellX(row, col), kbCellY(row)
 function kbCellChar(row, col) {
     return String.fromCharCode(0x20 + (tileAt(kbCellX(row, col), kbCellY(row)) % 96));
 }
-function kbFieldShown(text) {
+function isPasswordTitle(title) { return title.indexOf('PASSWORD') === 0; }
+/* 密码输入页为 2 行 x 18 格, 其余字段为 15 格单行滚动 */
+function kbFieldShown(title, text) {
+    if (isPasswordTitle(title)) {
+        const l1 = text.slice(0, 18);
+        const l2 = text.slice(18, 36);
+        let a = l1, b = l2;
+        if (text.length < 18) a += '_';
+        else if (text.length < 36) b += '_';
+        return rowText(2).slice(1, 19) === a.padEnd(18, ' ')
+            && rowText(3).slice(1, 19) === b.padEnd(18, ' ');
+    }
     const start = Math.max(0, text.length - 14);
     return rowText(2).slice(1, 16) === (text.slice(start) + '_').padEnd(15, ' ');
 }
 function kbScreenReady(title) {
+    if (isPasswordTitle(title)) {
+        return rowText(1).includes(title)
+            && rowText(2).slice(1, 19) === '_'.padEnd(18, ' ')
+            && rowText(3).slice(1, 19) === ''.padEnd(18, ' ');
+    }
     return rowText(1).includes(title) && rowText(2).slice(1, 16) === '_'.padEnd(15, ' ');
 }
 function kbScreenWith(title, text) {
-    return rowText(1).includes(title) && kbFieldShown(text);
+    return rowText(1).includes(title) && kbFieldShown(title, text);
 }
 
 /* 字符 -> { mode, r, c }; mode='ANY' 表示两字母页同格 (数字/. - _ @/空格) */
@@ -366,7 +390,7 @@ function kbSwitchTo(cur, state, mode) {
     }
 }
 
-function typeText(title, text, doneVerify) {
+function typeText(title, text, doneVerify, beforeSubmit) {
     if (!waitUntil(() => kbScreenReady(title), 400)) throw new Error('未进入 ' + title + ' 输入画面');
     const cur = { r: 0, c: 0 };
     const state = { mode: 'UPPER' };
@@ -376,8 +400,9 @@ function typeText(title, text, doneVerify) {
         if (t.mode !== 'ANY' && t.mode !== state.mode) kbSwitchTo(cur, state, t.mode);
         kbToCell(cur, state.mode, t.r, t.c);
         acc += ch;
-        if (!tapUntil('A', () => kbFieldShown(acc), 120, 6)) throw new Error('字段未显示 [' + acc + ']');
+        if (!tapUntil('A', () => kbFieldShown(title, acc), 120, 6)) throw new Error('字段未显示 [' + acc + ']');
     }
+    if (beforeSubmit) beforeSubmit();
     if (doneVerify) {
         if (!tapUntil('START', doneVerify, 200, 6)) throw new Error(title + ' 按 START 后未进入下一画面');
     } else {
@@ -396,7 +421,7 @@ function typeMore(title, initial, text, doneVerify) {
         if (t.mode !== 'ANY' && t.mode !== state.mode) kbSwitchTo(cur, state, t.mode);
         kbToCell(cur, state.mode, t.r, t.c);
         acc += ch;
-        if (!tapUntil('A', () => kbFieldShown(acc), 120, 6)) throw new Error('编辑字段未显示 [' + acc + ']');
+        if (!tapUntil('A', () => kbFieldShown(title, acc), 120, 6)) throw new Error('编辑字段未显示 [' + acc + ']');
     }
     if (doneVerify) {
         if (!tapUntil('START', doneVerify, 200, 6)) throw new Error(title + ' 按 START 后未进入下一画面');
@@ -642,7 +667,10 @@ try {
     waitOk(() => screenText().includes('PRESS START'), '标题画面出现 PRESS START');
     dump('01-title');
     ok(screenText().includes('GB PASSWORD'), '标题文字 GB PASSWORD');
-    ok(screenText().includes('V0.3.7.1'), '标题版本 V0.3.7.1');
+    ok(screenText().includes('V0.3.7.2'), '标题版本 V0.3.7.2');
+    const gGlyph = fontGlyph('g'), n9Glyph = fontGlyph('9');
+    ok(gGlyph[4] === 0x40 && gGlyph[5] === 0x5C && n9Glyph[3] === 0x3C && n9Glyph[4] === 0x04,
+        '小写 g 为双层字形, 与数字 9 明显区分');
 
     if (!tapUntil('START', () => pinScreenReady('NEW PIN', 6), 300, 8)) throw new Error('无法进入设置 PIN 画面');
     ok(true, '进入设置 6 位 PIN 画面');
@@ -725,7 +753,11 @@ try {
     typeText('USERNAME (MAX 20)', LONGUSR, () => kbScreenReady('PASSWORD (MAX 36)'));
     ok(true, '20 字符小写用户名输入完成 (键盘 v2)');
     const LONG = 'aB3!xY9#qW2$eR5%tY8&uI1(uO4)Kz6_@b?!';
-    typeText('PASSWORD (MAX 36)', LONG, () => screenText().includes('VAULT MENU'));
+    typeText('PASSWORD (MAX 36)', LONG, () => screenText().includes('VAULT MENU'), () => {
+        dump('05a-password-36');
+        ok((rowText(2).slice(1, 19) + rowText(3).slice(1, 19)) === LONG,
+            '36 位密码在两行输入框中完整可见');
+    });
     ok(true, '36 位混合大小写 + 符号密码输入完成并保存');
     dump('05b-menu-after-mixed');
 
@@ -743,7 +775,8 @@ try {
     ok(true, '标签 GENACC 输入完成 (第三账号)');
     if (!tapUntil('START', () => kbScreenReady('PASSWORD (MAX 36)'), 200, 6)) throw new Error('用户名留空后未进入密码页');
     ok(true, '用户名可留空 (START 直接跳过)');
-    ok(rowText(2).slice(1, 16) === '_'.padEnd(15, ' '), '密码页初始为空 (仅光标)');
+    ok(rowText(2).slice(1, 19) === '_'.padEnd(18, ' ') && rowText(3).slice(1, 19).trim() === '',
+        '密码页初始为空 (两行, 仅第一行光标)');
 
     const genFieldOk = () => rowText(2).slice(2, 16).trim() !== '';
     if (!tapUntil('SELECT', genFieldOk, 200, 6)) throw new Error('SELECT 未生成随机密码');
@@ -757,7 +790,7 @@ try {
     }
     ok(rerolled, '再按 SELECT 重掷 (内容变化)');
     frames(5);
-    const shownTail = rowText(2).slice(1, 15);
+    const genShown = rowText(2).slice(1, 19) + rowText(3).slice(1, 19);
 
     frames(5);
     tap('START');
@@ -772,7 +805,8 @@ try {
     ok([...pass2].every(c => GEN_ALL.includes(c)), '生成密码字符全部来自安全字符集 (无 0O1lI)');
     ok(/[A-Z]/.test(pass2) && /[a-z]/.test(pass2) && /[2-9]/.test(pass2) && /[.\-_@!#$%&()?+]/.test(pass2),
         '生成密码含大写/小写/数字/符号四类字符');
-    ok(pass2.slice(2, 16) === shownTail, '保存的密码与画面显示尾部一致');
+    ok(genShown.slice(0, 16) === pass2 && genShown[16] === '_',
+        '16 位生成密码在两行中完整可见 (第 17 格为光标)');
     ok(checksumOk(s), '生成密码写入后 SRAM 校验和正确');
 
     /* 列表: 位置 + 14 字符窗口 + 选中行跑马灯 */
@@ -796,6 +830,8 @@ try {
     if (!tapUntil('A', () => screenText().includes(detailTitle(0)), 200, 6)) throw new Error('未进入详情页');
     frames(5);
     ok(true, '进入详情页 (SLOT 001/255)');
+    ok(rowText(16).includes('START=EDIT') && rowText(17).includes('SEL+START=DELETE'),
+        '详情页 START=编辑 / SEL+START=删除');
     dump('07-detail-masked');
     ok(rowText(3).includes('EMAIL'), '详情页标签行显示 EMAIL');
     ok(rowText(5).includes('BOB'), '详情页用户名行显示 BOB');
@@ -806,9 +842,9 @@ try {
     ok(rowText(7).includes('ABC'), '按住 A 显示明文 ABC');
     frames(10);
 
-    /* SELECT+START 编辑: 标签保留, 用户名追加 X, 密码保留 */
-    chord(['SELECT', 'START']);
-    waitOk(() => kbScreenWith('LABEL (MAX 20)', 'EMAIL'), 'SELECT+START 进入编辑 (标签已预填)');
+    /* START 编辑: 标签保留, 用户名追加 X, 密码保留 */
+    tap('START');
+    waitOk(() => kbScreenWith('LABEL (MAX 20)', 'EMAIL'), 'START 进入编辑 (标签已预填)');
     ok(tapUntil('START', () => kbScreenWith('USERNAME (MAX 20)', 'BOB'), 200, 6), '标签确认后进入用户名编辑 (已预填)');
     typeMore('USERNAME (MAX 20)', 'BOB', 'X', () => kbScreenWith('PASSWORD (MAX 36)', 'ABC'));
     ok(true, '用户名追加为 BOBX, 密码页已预填 ABC');
@@ -825,9 +861,9 @@ try {
     ok(checksumOk(s), '编辑后 SRAM 校验和正确');
     ok(pm5RecCrc(s, 0) === rd16(s, PM5_REC_CRC), '编辑后记录 CRC16 已更新');
 
-    /* 单独 START 仍是删除确认 */
-    if (!tapUntil('START', () => screenText().includes('DELETE THIS SLOT?'), 200, 6)) throw new Error('START 未弹出删除确认');
-    ok(true, '单独按 START 弹出删除确认 (组合键不影响)');
+    /* SELECT+START 才是删除确认 */
+    chord(['SELECT', 'START']);
+    ok(waitUntil(() => screenText().includes('DELETE THIS SLOT?'), 200), 'SELECT+START 弹出删除确认');
     if (!tapUntil('B', () => screenText().includes(detailTitle(0)) && !screenText().includes('DELETE THIS'), 200, 6)) throw new Error('B 未取消删除');
     ok(recOf(sram(), 0).used === 0xA5, '取消删除后记录仍在');
 
@@ -1120,7 +1156,7 @@ try {
     if (!tapUntil('START', () => kbScreenReady('PASSWORD (MAX 36)'), 200, 6)) throw new Error('流程 D: 空用户名未进入密码页');
     if (!tapUntil('SELECT', () => rowText(2).slice(2, 16).trim() !== '', 200, 6)) throw new Error('流程 D: 255 号槽密码生成失败');
     frames(5);
-    const tail254 = rowText(2).slice(1, 15);
+    const shown254 = (rowText(2).slice(1, 19) + rowText(3).slice(1, 19)).slice(0, 16);
     frames(5);
     tap('START');
     waitOk(() => listReady(), '保存后回到列表 (255 号槽)', 1200);
@@ -1131,7 +1167,7 @@ try {
     const r254 = recOf(s, 254);
     ok(r254.used === 0xA5 && r254.llen === 4 && r254.label.startsWith('LAST'), '第 255 槽标签 = LAST');
     ok(r254.ulen === 0, '第 255 槽用户名为空');
-    ok(r254.plen === 16 && r254.pass.slice(2, 16) === tail254, '第 255 槽密码 = 生成的 16 位 (与显示一致)');
+    ok(r254.plen === 16 && r254.pass.slice(0, 16) === shown254, '第 255 槽密码 = 生成的 16 位 (与显示一致)');
     ok(16 + 254 * REC_SZ === 20336, '第 255 槽起始地址 = 20336 (存储体 2)');
     ok(Math.floor((16 + 254 * REC_SZ) / 8192) === 2, '第 255 槽位于第 3 个 8KB 存储体');
     ok(checksumOk(s), '跨 3 个存储体 (20416 字节) 校验和正确');
@@ -1139,8 +1175,9 @@ try {
     /* 详情删除 255 号槽 */
     if (!tapUntil('A', () => screenText().includes(detailTitle(254)), 200, 6)) throw new Error('流程 D: 未打开 SLOT 255 详情');
     frames(5);
-    if (!tapUntil('START', () => screenText().includes('DELETE THIS SLOT?'), 200, 6)) throw new Error('流程 D: 未出现删除确认');
-    ok(true, '详情页 START 弹出删除确认');
+    chord(['SELECT', 'START']);
+    if (!waitUntil(() => screenText().includes('DELETE THIS SLOT?'), 200)) throw new Error('流程 D: 未出现删除确认');
+    ok(true, '详情页 SELECT+START 弹出删除确认');
     if (!tapUntil('A', () => listReady(), 400, 6)) throw new Error('流程 D: 删除后未返回列表');
     ok(rowText(14).includes('255 EMPTY'), '删除后 255 号槽恢复 EMPTY');
     s = sram();
@@ -1204,7 +1241,7 @@ try {
     const save2 = sram();
     fs.writeFileSync(path.join(OUT, 'save2-migrated.bin'), Buffer.from(save2));
 
-    /* 迁移后的旧记录补填用户名 (SELECT+START 编辑) */
+    /* 迁移后的旧记录补填用户名 (START 编辑) */
     menuGoto(0);
     if (!tapUntil('A', () => listReady(), 200, 6)) throw new Error('迁移: 未进入列表');
     dump('21-migrated-list');
@@ -1212,7 +1249,7 @@ try {
     if (!tapUntil('A', () => screenText().includes(detailTitle(0)), 200, 6)) throw new Error('迁移: 未打开 EMAIL 详情');
     frames(5);
     ok(rowText(4).includes('USER:') && rowText(5).trim() === '', '迁移记录用户名行为空');
-    chord(['SELECT', 'START']);
+    tap('START');
     waitOk(() => kbScreenWith('LABEL (MAX 20)', 'EMAIL'), '迁移记录可进入编辑');
     if (!tapUntil('START', () => kbScreenReady('USERNAME (MAX 20)'), 200, 6)) throw new Error('迁移: 用户名页未出现');
     typeText('USERNAME (MAX 20)', 'OWNER', () => kbScreenWith('PASSWORD (MAX 36)', 'ABC'));
@@ -1397,7 +1434,8 @@ try {
     listGoto(3);
     if (!tapUntil('A', () => screenText().includes(detailTitle(3)), 200, 6)) throw new Error('流程 F: 未打开 SHORT 详情');
     frames(5);
-    if (!tapUntil('START', () => screenText().includes('DELETE THIS SLOT?'), 200, 6)) throw new Error('流程 F: 未出现删除确认');
+    chord(['SELECT', 'START']);
+    if (!waitUntil(() => screenText().includes('DELETE THIS SLOT?'), 200)) throw new Error('流程 F: 未出现删除确认');
     if (!tapUntil('A', () => listReady(), 600, 6)) throw new Error('流程 F: 删除后未返回列表');
     ok(rowText(6).includes('004 EMPTY'), '删除后列表 004 EMPTY');
     s = sram();
@@ -1467,12 +1505,16 @@ try {
 
         listGoto(0);
         if (!tapUntil('A', () => screenText().includes(detailTitle(0)), 200, 6)) throw new Error('流程 G: 未打开 SLOT01');
-        if (!tapUntil('START', () => screenText().includes('DELETE THIS SLOT?'), 200, 6)) throw new Error('流程 G: SLOT01 未出现删除确认');
+        frames(5);
+        chord(['SELECT', 'START']);
+        if (!waitUntil(() => screenText().includes('DELETE THIS SLOT?'), 200)) throw new Error('流程 G: SLOT01 未出现删除确认');
         if (!tapUntil('A', () => listReady(), 600, 6)) throw new Error('流程 G: SLOT01 删除后未返回列表');
 
         listGoto(1);
         if (!tapUntil('A', () => screenText().includes(detailTitle(1)), 200, 6)) throw new Error('流程 G: 未打开 SLOT02');
-        if (!tapUntil('START', () => screenText().includes('DELETE THIS SLOT?'), 200, 6)) throw new Error('流程 G: SLOT02 未出现删除确认');
+        frames(5);
+        chord(['SELECT', 'START']);
+        if (!waitUntil(() => screenText().includes('DELETE THIS SLOT?'), 200)) throw new Error('流程 G: SLOT02 未出现删除确认');
         if (!tapUntil('A', () => listReady(), 600, 6)) throw new Error('流程 G: SLOT02 删除后未返回列表');
         s = sram();
         ok(recOf(s, 0).used === 0 && recOf(s, 1).used === 0, '流程 G: 两条记录已进入回收站');

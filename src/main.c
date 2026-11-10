@@ -1,5 +1,5 @@
 /*
- * GB Password Vault v0.3.7.1
+ * GB Password Vault v0.3.7.2
  * ------------------------------------------------------------------
  * 在真实 Game Boy (DMG / GBC 兼容模式 / GBA) 上运行的离线密码管理器。
  * 编译工具链: GBDK-2020 4.5.0  (C/SDCC)
@@ -17,7 +17,7 @@
  *              用户名可留空; 密码页按 SELECT 生成 16 位随机强密码
  *   - 列表页:   12 行滚动窗口 + 右上角位置 (nnn/255), 上下步进 / 左右跳 8 条;
  *              选中行标签超过 14 字符时来回跑马灯显示
- *   - 详情页:   按住 A 显示密码明文 (分两行), SELECT+START 编辑, START 删除
+ *   - 详情页:   按住 A 显示密码明文 (分两行), START 编辑, SELECT+START 删除
  *   - 存档升级: PMG3 验证旧 PIN 后迁移; PMG4 自动就地升级到 PMG5
  *   - 全部数据即时写入 SRAM; PMG5 双头 + 记录 CRC16 + WAL 写前日志
  *
@@ -2151,18 +2151,39 @@ static char kb_char(uint8_t row, uint8_t col)
     return (kb_mode == KB_LOWER ? KB_LO : KB_UP)[row * 8 + col];
 }
 
-/* 15 格输入窗: 超过 14 字符时向左滚动, 光标 '_' 恒定在可见末尾 */
-static void draw_field_line(const char *buf, uint8_t len)
+/* 普通字段: 15 格单行, 超过 14 字符向左滚动;
+ * 密码字段 (two_line=1): 2 行 x 18 格, 最多 36 字符全部可见. */
+static void draw_field(const char *buf, uint8_t len, uint8_t two_line)
 {
-    char line[16];
-    uint8_t start = (len > 14) ? (uint8_t)(len - 14) : 0;
-    uint8_t i;
-    for (i = 0; i < 15; i++) {
-        uint8_t idx = (uint8_t)(start + i);
-        line[i] = (idx < len) ? buf[idx] : (char)((idx == len) ? '_' : ' ');
+    char line[19];
+    uint8_t i, idx;
+
+    if (two_line) {
+        for (i = 0; i < 18; i++) {
+            idx = i;
+            line[i] = (idx < len) ? buf[idx] : (char)((idx == len) ? '_' : ' ');
+        }
+        line[18] = 0;
+        put_str(1, 2, line);
+        for (i = 0; i < 18; i++) {
+            idx = (uint8_t)(18 + i);
+            line[i] = (idx < len) ? buf[idx] : (char)((idx == len) ? '_' : ' ');
+        }
+        line[18] = 0;
+        put_str(1, 3, line);
+        return;
     }
-    line[15] = 0;
-    put_str(1, 2, line);
+
+    {
+        uint8_t start = (len > 14) ? (uint8_t)(len - 14) : 0;
+        for (i = 0; i < 15; i++) {
+            idx = (uint8_t)(start + i);
+            line[i] = (idx < len) ? buf[idx] : (char)((idx == len) ? '_' : ' ');
+        }
+        line[15] = 0;
+        put_str(1, 2, line);
+        put_fixed(1, 3, "", 18, 0);   /* 单行字段清掉第二行, 避免残留 */
+    }
 }
 
 static void kb_draw_cell(uint8_t row, uint8_t col, uint8_t inv)
@@ -2189,7 +2210,7 @@ static void draw_edit(const char *title, const char *buf, uint8_t len,
     uint8_t r, c;
     screen_clear();
     put_str(1, 1, title);
-    draw_field_line(buf, len);
+    draw_field(buf, len, gen);
     for (r = 0; r < 5; r++)
         for (c = 0; c < 8; c++)
             kb_draw_cell(r, c, 0);
@@ -2224,7 +2245,7 @@ static int16_t edit_field(const char *title, char *buf, uint8_t max, uint8_t gen
         if (k & J_SELECT) {
             if (gen) {                  /* 生成 / 重掷随机密码 */
                 len = gen_password(buf, max);
-                draw_field_line(buf, len);
+                draw_field(buf, len, gen);
                 continue;
             }
             return -1;
@@ -2234,7 +2255,7 @@ static int16_t edit_field(const char *title, char *buf, uint8_t max, uint8_t gen
             continue;
         }
         if (k & J_B) {
-            if (len) { len--; buf[len] = 0; draw_field_line(buf, len); }
+            if (len) { len--; buf[len] = 0; draw_field(buf, len, gen); }
             continue;
         }
         if (k & J_LEFT) {
@@ -2278,7 +2299,7 @@ static int16_t edit_field(const char *title, char *buf, uint8_t max, uint8_t gen
                 char ch = kb_char(row, col);
                 if (ch != ' ' && len < max) {
                     buf[len] = ch; len++; buf[len] = 0;
-                    draw_field_line(buf, len);
+                    draw_field(buf, len, gen);
                 }
             } else if (col == 0) {          /* Aa: 切大小写 (符号页则回大写) */
                 kb_mode = (kb_mode == KB_SYM) ? KB_UPPER
@@ -2288,9 +2309,9 @@ static int16_t edit_field(const char *title, char *buf, uint8_t max, uint8_t gen
                 kb_mode = (kb_mode == KB_SYM) ? KB_UPPER : KB_SYM;
                 draw_edit(title, buf, len, row, col, gen);
             } else if (col == 2) {          /* SPACE */
-                if (len < max) { buf[len] = ' '; len++; buf[len] = 0; draw_field_line(buf, len); }
+                if (len < max) { buf[len] = ' '; len++; buf[len] = 0; draw_field(buf, len, gen); }
             } else if (col == 3) {          /* DEL */
-                if (len) { len--; buf[len] = 0; draw_field_line(buf, len); }
+                if (len) { len--; buf[len] = 0; draw_field(buf, len, gen); }
             } else {                        /* OK */
                 if (len || allow_empty) return (int16_t)len;
             }
@@ -2454,8 +2475,8 @@ static void draw_detail(uint16_t i)
     put_tile(18, 6, 251);
     draw_pass_line(0);
     put_str(1, 15, "A=REVEAL B=BACK");
-    put_str(1, 16, "SEL+START=EDIT");
-    put_str(1, 17, "START=DELETE");
+    put_str(1, 16, "START=EDIT");
+    put_str(1, 17, "SEL+START=DELETE");
 }
 
 /* 编辑已有条目: 三个字段均预填, 可逐页修改; 返回 1 = 自动锁屏 */
@@ -2514,18 +2535,9 @@ static uint8_t detail_screen(uint16_t i)
         if ((j & J_A) && !reveal) { reveal = 1; draw_pass_line(1); }
         else if (!(j & J_A) && reveal) { reveal = 0; draw_pass_line(0); }
 
-        /* 编辑组合键必须放在 START 删除之前判断 */
+        /* SEL+START 删除组合键必须放在 START 编辑之前判断,
+         * 避免把“想编辑”误判成删除. */
         if ((j & (J_SELECT | J_START)) == (J_SELECT | J_START)) {
-            waitpadup();
-            if (edit_flow(i)) return 1;
-            slot_read(i, &cur);
-            draw_detail(i);
-            reveal = 0;
-            prev = joypad();
-            continue;
-        }
-
-        if (pressed & J_START) {
             put_str(1, 13, "DELETE THIS SLOT?");
             put_str(1, 14, "A=YES  B=NO");
             waitpadup();
@@ -2541,6 +2553,18 @@ static uint8_t detail_screen(uint16_t i)
             }
             draw_detail(i);
             reveal = 0;
+            prev = joypad();
+            continue;
+        }
+
+        if (pressed & J_START) {
+            waitpadup();
+            if (edit_flow(i)) return 1;
+            slot_read(i, &cur);
+            draw_detail(i);
+            reveal = 0;
+            prev = joypad();
+            continue;
         }
         prev = j;
     }
@@ -3186,7 +3210,7 @@ static uint8_t migrate_v03(void)
 
     screen_clear();
     put_str(2, 4, "SAVE UPGRADED");
-    put_str(1, 6, "V0.3.7.1 READY");
+    put_str(1, 6, "V0.3.7.2 READY");
     delay(1800);
     recovery_offer();
     return 1;
@@ -3207,7 +3231,7 @@ static uint8_t migrate_v04(void)
 
     screen_clear();
     put_str(2, 4, "SAVE UPGRADED");
-    put_str(1, 6, "V0.3.7.1 READY");
+    put_str(1, 6, "V0.3.7.2 READY");
     delay(1200);
     return 1;
 }
@@ -3429,7 +3453,7 @@ void main(void)
     put_tile(9, 2, 254);
     put_str(4, 3, "GB PASSWORD");
     put_str(7, 5, "VAULT");
-    put_str(6, 8, "V0.3.7.1");
+    put_str(6, 8, "V0.3.7.2");
     put_str(4, 11, "PRESS START");
     put_str(1, 16, "BATTERY CART NEEDED");
     getkey(J_START);
