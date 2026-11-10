@@ -1,5 +1,7 @@
 # GB 密码本（GB Password Keeper）
 
+[中文](README.md) | [English](README.en.md) | [日本語](README.ja.md)
+
 > ⚠️ **项目已转向实机 ROM 路线（GBDK-2020 C 直编）**：交付物 `build/passmgr.gb`（**V0.3.7.1**，
 > 255 槽 + 20 字符标签/用户名 + 6 位 PIN + 随机密码生成器 + 32KB SRAM 存档 +
 > 回收站/自动锁屏/生成器设置 + **2bpp 图形 PIN 界面** + **PMG5 双头/CRC16/WAL 存档保护**
@@ -81,7 +83,9 @@ node tools/emu/smoke.js
 
 ```
 gbs-password-manager/
-├── README.md                       ← 你在这里
+├── README.md                       ← 你在这里（中文）
+├── README.en.md                    ← English
+├── README.ja.md                    ← 日本語
 ├── docs/
 │   ├── 01-架构与场景规划.md          ← 6 个场景、跳转图、背景画法
 │   ├── 02-核心事件逻辑.md            ← 每个场景的 GB Studio 事件配方 + 伪代码
