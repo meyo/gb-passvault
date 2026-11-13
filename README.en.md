@@ -1,20 +1,22 @@
-# GB Password Keeper
+# GB Password Vault
 
 [中文](README.md) | [English](README.en.md) | [日本語](README.ja.md)
 
+> **Download**: [GitHub Releases](https://github.com/meyo/gb-passvault/releases/latest) — `passmgr.gb` + SHA-256
+
 <p align="center">
-  <img src="docs/images/hardware-vault-menu.jpg" width="560" alt="GB Password Keeper running on real Game Boy hardware: VAULT MENU">
+  <img src="docs/images/hardware-vault-menu.jpg" width="560" alt="GB Password Vault running on real Game Boy hardware: VAULT MENU">
   <br>
   <em>Running on real hardware (Game Boy DMG): VAULT MENU</em>
 </p>
 
 > Note: The authoritative implementation summary (`docs/05`) is currently available in Chinese only.
 
-> ⚠️ **This project has moved to a real-hardware ROM path (compiled directly in C with GBDK-2020)**: the deliverable is `build/passmgr.gb` (**V0.3.7.3**,
+> ⚠️ **This project has moved to a real-hardware ROM path (compiled directly in C with GBDK-2020)**: the deliverable is `build/passmgr.gb` (**V0.3.7.4**,
 > 255 slots + 20-character labels/usernames + 6-digit PIN + random password generator + 32KB SRAM save +
 > recycle bin/auto-lock/generator settings + **2bpp graphical PIN screen** + **PMG5 dual-header/CRC16/WAL save protection**
-> + **optional 12-digit recovery code**), with **356/356 automated tests passing**; **V0.3.7.3 has been verified on real hardware**
-> (the three issues from V0.3.7.1 and the V0.3.7.2 lowercase-g glyph are fixed). **For the current state of the project, see
+> + **optional 12-digit recovery code**), with **357/357 automated tests passing**; **V0.3.7.3 has been verified on real hardware**
+> (the three issues from V0.3.7.1 and the V0.3.7.2 lowercase-g glyph are fixed; V0.3.7.4 unifies the project name and fixes the empty-slot row, with the save format unchanged). **For the current state of the project, see
 > [`docs/05-GBDK实机版实现总结.md`](docs/05-GBDK实机版实现总结.md)**.
 > This README, `docs/01~04`, `plugins/`, and `assets/` are materials from the early GB Studio approach, kept for design reference only.
 > The ASCII `+--+` segmented PIN screen from V0.3.3 is obsolete; V0.3.4 reworked it, based on `art/gb_login_filled.png`, into
@@ -32,13 +34,14 @@
 > (rows 8–10 are cleared first, then a 9-slice border + centered text).
 > **V0.3.7.2 hardware fixes**: the detail screen now uses **`START` alone to edit and `SELECT+START` to delete**, reducing accidental deletions;
 > the password input page now uses **2 lines × 18 cells**, so passwords of 16–36 characters are fully visible.
+> **V0.3.7.4 maintenance update**: project name unified as **GB Password Vault**; fixed an out-of-bounds read in the empty-slot row that appended stray characters after `EMPTY`; PMG5 save format unchanged; 357/357 tests passing.
 > **V0.3.7.3 glyph fix**: lowercase `g` now uses a Nintendo DMG-style single-storey glyph (upper bowl + bottom bar + right stem + left hook).
 > **A note on lowercase `g`**: the ROM uses 8×8 tiles with a 5×7 glyph area, so lowercase letters have only 5 px of width.
 > In earlier versions the single-storey `g` was easily confused with `9`, while the V0.3.7.2 double-storey `g` looked like a shrunken uppercase `G`.
 > V0.3.7.3 uses the DMG-style single-storey `g`, which is distinguishable from both `9` and `G` on the keyboard, labels, usernames and passwords.
 > Due to the 5 px limit, this is not a typographic double-storey `g`, but a readability compromise for a small dot-matrix font.
 >
-> **V0.3.7.3 quick start**: flash `build/passmgr.gb` (MBC1+RAM+BATTERY, requires a cartridge with ≥32KB SRAM save),
+> **V0.3.7.4 quick start**: flash `build/passmgr.gb` (MBC1+RAM+BATTERY, requires a cartridge with ≥32KB SRAM save),
 > set a **6-digit PIN** on first boot, then skip or generate a 12-digit recovery code. The PIN screen uses a `SECRET VAULT` title +
 > six widened graphical segments + a raised numeric keypad (`CLR` clears all, `B` deletes one, `START` confirms).
 > In the main menu, `ADD ACCOUNT` asks for a label (≤20), username (≤20, may be empty),
@@ -63,7 +66,7 @@
 > (the V0.3 baseline is kept in `archive/v0.3/`).
 > **Upgrading from V0.3.1–V0.3.6**: PMG4 saves are upgraded in place to PMG5 automatically (dual headers/CRC/WAL),
 > without moving slots or asking for the PIN again; after the upgrade, old PMG4 ROMs can still read the low-area mirror,
-> but **writing with old versions is not recommended**. **Upgrading from V0.3.7 / V0.3.7.1 / V0.3.7.2 to V0.3.7.3**: the PMG5 save format is unchanged;
+> but **writing with old versions is not recommended**. **Upgrading from V0.3.7 / V0.3.7.1 / V0.3.7.2 / V0.3.7.3 to V0.3.7.4**: the PMG5 save format is unchanged;
 > just flash the new ROM, and an existing recovery code is preserved. **Back up (dump) your save before upgrading.**
 
 ## First clone / build

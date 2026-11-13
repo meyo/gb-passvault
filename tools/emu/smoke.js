@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * smoke.js - GB Password Vault v0.3.7.3 无头冒烟测试 (serverboy)
+ * smoke.js - GB Password Vault v0.3.7.4 无头冒烟测试 (serverboy)
  *
  * 通过模拟器按键驱动完整流程, 断言:
  *   - 屏幕文本 (读 serverboy 的 DMG tilemap buffer, 等于画面实际内容)
@@ -668,7 +668,7 @@ try {
     waitOk(() => screenText().includes('PRESS START'), '标题画面出现 PRESS START');
     dump('01-title');
     ok(screenText().includes('GB PASSWORD'), '标题文字 GB PASSWORD');
-    ok(screenText().includes('V0.3.7.3'), '标题版本 V0.3.7.3');
+    ok(screenText().includes('V0.3.7.4'), '标题版本 V0.3.7.4');
     const gGlyph = fontGlyph('g'), n9Glyph = fontGlyph('9');
     ok(gGlyph[2] === 0x38 && gGlyph[5] === 0x3C && gGlyph[6] === 0x18 && gGlyph[7] === 0x70
         && n9Glyph[3] === 0x3C && n9Glyph[4] === 0x04,
@@ -820,6 +820,8 @@ try {
     ok(rowText(3).includes('001 EMAIL'), '列表第 1 行显示 001 EMAIL');
     ok(rowText(5).includes('003 GENACC'), '列表第 3 行显示 003 GENACC');
     ok(rowText(4).includes('002 '), '列表第 2 行显示 002');
+    ok(rowText(6).slice(1, 19) === '004 EMPTY' + ' '.repeat(9),
+        '空槽位行只显示 EMPTY，没有越界杂字');
 
     /* 选中 20 字符标签: 先滚到尾部再滚回头部 */
     if (!tapUntil('DOWN', () => listSel() === 1, 120, 4)) throw new Error('无法选中第 2 条');

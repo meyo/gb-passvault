@@ -1,13 +1,13 @@
 # password-manager 插件（可选）
 
-为「GB 密码本」项目提供的自定义脚本事件（GB Studio 4.x 脚本事件插件）。
+为「GB Password Vault」项目提供的自定义脚本事件（GB Studio 4.x 脚本事件插件）。
 
 ## 安装
 
 1. 把整个 `password-manager` 文件夹复制到你的 GB Studio 项目根目录下的 `plugins/` 文件夹：
 
    ```
-   我的密码本.gbsproj
+   GB Password Vault.gbsproj
    plugins/
      password-manager/
        events/

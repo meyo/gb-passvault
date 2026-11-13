@@ -1,18 +1,20 @@
-# GB 密码本（GB Password Keeper）
+# GB Password Vault
 
 [中文](README.md) | [English](README.en.md) | [日本語](README.ja.md)
 
+> **下载 / Download / ダウンロード**：[GitHub Releases](https://github.com/meyo/gb-passvault/releases/latest) — `passmgr.gb` + SHA-256
+
 <p align="center">
-  <img src="docs/images/hardware-vault-menu.jpg" width="560" alt="GB Password Keeper running on real Game Boy hardware: VAULT MENU">
+  <img src="docs/images/hardware-vault-menu.jpg" width="560" alt="GB Password Vault running on real Game Boy hardware: VAULT MENU">
   <br>
   <em>实机运行画面（Game Boy DMG）：VAULT MENU</em>
 </p>
 
-> ⚠️ **项目已转向实机 ROM 路线（GBDK-2020 C 直编）**：交付物 `build/passmgr.gb`（**V0.3.7.3**，
+> ⚠️ **项目已转向实机 ROM 路线（GBDK-2020 C 直编）**：交付物 `build/passmgr.gb`（**V0.3.7.4**，
 > 255 槽 + 20 字符标签/用户名 + 6 位 PIN + 随机密码生成器 + 32KB SRAM 存档 +
 > 回收站/自动锁屏/生成器设置 + **2bpp 图形 PIN 界面** + **PMG5 双头/CRC16/WAL 存档保护**
-> + **可选 12 位恢复码**），**356/356 自动化测试通过**；**V0.3.7.3 已通过真机复测**
-> （V0.3.7.1 的 3 个问题 + V0.3.7.2 的小写 g 字形已修正）。**当前工程现状请看
+> + **可选 12 位恢复码**），**357/357 自动化测试通过**；**V0.3.7.3 已通过真机复测**
+> （V0.3.7.1 的 3 个问题 + V0.3.7.2 的小写 g 字形已修正；V0.3.7.4 统一项目名并修复空槽位行显示，存档格式不变）。**当前工程现状请看
 > [`docs/05-GBDK实机版实现总结.md`](docs/05-GBDK实机版实现总结.md)**。
 > 本 README 与 `docs/01~04`、`plugins/`、`assets/` 为早期 GB Studio 方案资料，仅作设计参考。
 > V0.3.3 的 ASCII `+--+` 分格 PIN 界面已作废；V0.3.4 按 `art/gb_login_filled.png` 重做为
@@ -30,13 +32,15 @@
 > （先清空 8–10 行，9-slice 边框 + 居中文字）。
 > **V0.3.7.2 真机修正**：详情页改为 **单按 `START` 编辑、`SELECT+START` 删除**，降低误删风险；
 > 密码输入页改为 **2 行 × 18 格**，16–36 位密码全部可见（不再只显示尾部）。
+> **V0.3.7.4 维护更新**：项目名统一为 **GB Password Vault**；修复账号列表空槽位行读取
+> `"EMPTY"` 字符串越界、末尾出现杂字的问题；PMG5 存档格式不变，357/357 测试通过。
 > **V0.3.7.3 字形修正**：小写 `g` 改为任天堂 DMG 风格的单层字形（上碗 + 底横 + 右竖 + 左勾尾）。
 > **关于小写 `g` 的现实情况**：本 ROM 使用 8×8 tile、5×7 有效点阵，小写字母只有 5px 宽。
 > 早期单层 `g` 容易与数字 `9` 混淆，V0.3.7.2 的双层 `g` 又接近缩小版大写 `G`。V0.3.7.3 改用 DMG 风格后，
 > 在键盘、标签、用户名和密码中都能与 `9` / `G` 区分。受 5px 宽度限制，它不是印刷体意义上的标准双层 `g`，
 > 而是小尺寸点阵下的可读性妥协。
 >
-> **V0.3.7.3 快速上手**：烧录 `build/passmgr.gb`（MBC1+RAM+BATTERY，需 ≥32KB SRAM 存档的卡带），
+> **V0.3.7.4 快速上手**：烧录 `build/passmgr.gb`（MBC1+RAM+BATTERY，需 ≥32KB SRAM 存档的卡带），
 > 首次开机设 **6 位 PIN**，随后可跳过或生成 12 位恢复码。PIN 画面采用 `SECRET VAULT` 标题 +
 > 6 个加宽图形分格框 + 立体数字键盘（`CLR` 清空全部，`B` 退格，`START` 确认）。
 > 主菜单 `ADD ACCOUNT` 依次输入标签（≤20）、用户名（≤20，可留空）、
@@ -61,7 +65,7 @@
 > （V0.3 基线保留在 `archive/v0.3/`）。
 > **从 V0.3.1–V0.3.6 升级**：PMG4 存档自动就地升级到 PMG5（双头/CRC/WAL），
 > 不移动槽位、不要求重新输入 PIN；升级后旧版 PMG4 ROM 仍可只读低区镜像，
-> 但**不建议旧版继续写入**。**从 V0.3.7 / V0.3.7.1 / V0.3.7.2 升级到 V0.3.7.3**：PMG5 存档格式不变，
+> 但**不建议旧版继续写入**。**从 V0.3.7 / V0.3.7.1 / V0.3.7.2 / V0.3.7.3 升级到 V0.3.7.4**：PMG5 存档格式不变，
 > 直接烧录新 ROM 即可，已设置的恢复码会保留。**升级前建议先备份（dump）存档。**
 
 ## 首次克隆 / 构建

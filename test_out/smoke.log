@@ -37,11 +37,11 @@
          ^
     GB PASSWORD
        VAULT
-      V0.3.7.3
+      V0.3.7.4
     PRESS START
  BATTERY CART NEEDED
   ok   标题文字 GB PASSWORD
-  ok   标题版本 V0.3.7.3
+  ok   标题版本 V0.3.7.4
   ok   小写 g 为 DMG 单层左勾尾, 与数字 9 / 大写 G 明显区分
   ok   进入设置 6 位 PIN 画面
 --- 02-newpin ---
@@ -149,7 +149,7 @@ Aa ABC SPACE  DEL OK
 --- 05c-generated-password ---
 
  PASSWORD (MAX 36)
- RPC#KB)6j#RV2V8Y_
+ CU8d%GV(wtWXMzUh_
   A B C D E F G H
   I J K L M N O P
   Q R S T U V W X
@@ -174,21 +174,22 @@ Aa SYM SPACE  DEL OK
  001 EMAIL
  002 ABCDEFGHIJKLMN
  003 GENACC
- 004 EMPTY -      )
- 005 EMPTY -      )
- 006 EMPTY -      )
- 007 EMPTY -      )
- 008 EMPTY -      )
- 009 EMPTY -      )
- 010 EMPTY -      )
- 011 EMPTY -      )
- 012 EMPTY -      )
+ 004 EMPTY
+ 005 EMPTY
+ 006 EMPTY
+ 007 EMPTY
+ 008 EMPTY
+ 009 EMPTY
+ 010 EMPTY
+ 011 EMPTY
+ 012 EMPTY
  L/R=PAGE SEL=USER
  A=OPEN B=BACK
   ok   列表右上角显示 001/255
   ok   列表第 1 行显示 001 EMAIL
   ok   列表第 3 行显示 003 GENACC
   ok   列表第 2 行显示 002
+  ok   空槽位行只显示 EMPTY，没有越界杂字
   ok   选中 20 字符标签的条目 (跑马灯)
   ok   跑马灯滚动显示标签尾部
   ok   跑马灯回滚显示标签头部
@@ -198,15 +199,15 @@ Aa SYM SPACE  DEL OK
  001 EMAIL
  002 ABCDEFGHIJKLMN
  003 GENACC
- 004 EMPTY -      )
- 005 EMPTY -      )
- 006 EMPTY -      )
- 007 EMPTY -      )
- 008 EMPTY -      )
- 009 EMPTY -      )
- 010 EMPTY -      )
- 011 EMPTY -      )
- 012 EMPTY -      )
+ 004 EMPTY
+ 005 EMPTY
+ 006 EMPTY
+ 007 EMPTY
+ 008 EMPTY
+ 009 EMPTY
+ 010 EMPTY
+ 011 EMPTY
+ 012 EMPTY
  L/R=PAGE SEL=USER
  A=OPEN B=BACK
   ok   进入详情页 (SLOT 001/255)
@@ -377,15 +378,15 @@ WIPE ERASES ALL DATA
  001 EMAIL
  002 ABCDEFGHIJKLMN
  003 GENACC
- 004 EMPTY -      )
- 005 EMPTY -      )
- 006 EMPTY -      )
- 007 EMPTY -      )
- 008 EMPTY -      )
- 009 EMPTY -      )
- 010 EMPTY -      )
- 011 EMPTY -      )
- 012 EMPTY -      )
+ 004 EMPTY
+ 005 EMPTY
+ 006 EMPTY
+ 007 EMPTY
+ 008 EMPTY
+ 009 EMPTY
+ 010 EMPTY
+ 011 EMPTY
+ 012 EMPTY
  L/R=PAGE SEL=USER
  A=OPEN B=BACK
   ok   断电重开后账号 EMAIL 仍在
@@ -460,18 +461,18 @@ WIPE ERASES ALL DATA
 --- 17-list-window-bottom ---
  ACCOUNTS    255/255
          HOLD B=LOCK
- 244 EMPTY -      )
- 245 EMPTY -      )
- 246 EMPTY -      )
- 247 EMPTY -      )
- 248 EMPTY -      )
- 249 EMPTY -      )
- 250 EMPTY -      )
- 251 EMPTY -      )
- 252 EMPTY -      )
- 253 EMPTY -      )
- 254 EMPTY -      )
- 255 EMPTY -      )
+ 244 EMPTY
+ 245 EMPTY
+ 246 EMPTY
+ 247 EMPTY
+ 248 EMPTY
+ 249 EMPTY
+ 250 EMPTY
+ 251 EMPTY
+ 252 EMPTY
+ 253 EMPTY
+ 254 EMPTY
+ 255 EMPTY
  L/R=PAGE SEL=USER
  A=OPEN B=BACK
   ok   底部再右跳保持 255/255
@@ -558,15 +559,15 @@ Aa SYM SPACE  DEL OK
  001 EMAIL
  002 MIXED
  003 GENACC
- 004 EMPTY -      )
- 005 EMPTY -      )
- 006 EMPTY -      )
- 007 EMPTY -      )
- 008 EMPTY -      )
- 009 EMPTY -      )
- 010 EMPTY -      )
- 011 EMPTY -      )
- 012 EMPTY -      )
+ 004 EMPTY
+ 005 EMPTY
+ 006 EMPTY
+ 007 EMPTY
+ 008 EMPTY
+ 009 EMPTY
+ 010 EMPTY
+ 011 EMPTY
+ 012 EMPTY
  L/R=PAGE SEL=USER
  A=OPEN B=BACK
   ok   迁移后列表显示旧账号
@@ -616,14 +617,14 @@ Aa SYM SPACE  DEL OK
  002 abcdefghijklmn
  003 -
  004 -
- 005 EMPTY -      )
- 006 EMPTY -      )
- 007 EMPTY -      )
- 008 EMPTY -      )
- 009 EMPTY -      )
- 010 EMPTY -      )
- 011 EMPTY -      )
- 012 EMPTY -      )
+ 005 EMPTY
+ 006 EMPTY
+ 007 EMPTY
+ 008 EMPTY
+ 009 EMPTY
+ 010 EMPTY
+ 011 EMPTY
+ 012 EMPTY
  L/R=PAGE SEL=LABEL
  A=OPEN B=BACK
   ok   列表视图模式持久化 (头部 0x0F = 1)
@@ -637,14 +638,14 @@ Aa SYM SPACE  DEL OK
  002 abcdefghijklmn
  003 -
  004 -
- 005 EMPTY -      )
- 006 EMPTY -      )
- 007 EMPTY -      )
- 008 EMPTY -      )
- 009 EMPTY -      )
- 010 EMPTY -      )
- 011 EMPTY -      )
- 012 EMPTY -      )
+ 005 EMPTY
+ 006 EMPTY
+ 007 EMPTY
+ 008 EMPTY
+ 009 EMPTY
+ 010 EMPTY
+ 011 EMPTY
+ 012 EMPTY
  L/R=PAGE SEL=LABEL
  A=OPEN B=BACK
   ok   切回标签视图持久化 (0x0F = 0)
@@ -732,7 +733,7 @@ Aa SYM SPACE  DEL OK
 
    YOUR RECOVERY
     CODE
-   0068 7694 1071
+   9118 8684 1704
  WRITE IT DOWN NOW
  IT WILL NOT SHOW
  AGAIN
@@ -827,5 +828,5 @@ RECOVERY UNAVAILABLE
 WIPE ERASES ALL DATA
 
 ==============================
-断言: 356 / 356 通过
+断言: 357 / 357 通过
 全部通过

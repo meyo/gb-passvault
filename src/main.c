@@ -1,5 +1,5 @@
 /*
- * GB Password Vault v0.3.7.3
+ * GB Password Vault v0.3.7.4
  * ------------------------------------------------------------------
  * 在真实 Game Boy (DMG / GBC 兼容模式 / GBA) 上运行的离线密码管理器。
  * 编译工具链: GBDK-2020 4.5.0  (C/SDCC)
@@ -2377,8 +2377,9 @@ static void slot_row_text(uint16_t idx, char *out, uint8_t off)
             out[4 + j] = (k < n) ? src[k] : ' ';
         }
     } else {
-        static const char *e = "EMPTY";
-        for (j = 0; j < LIST_LABEL_W; j++) out[4 + j] = e[j] ? e[j] : ' ';
+        static const char e[] = "EMPTY";
+        for (j = 0; j < LIST_LABEL_W; j++)
+            out[4 + j] = (j < sizeof(e) - 1) ? e[j] : ' ';
     }
     out[4 + LIST_LABEL_W] = 0;
 }
@@ -3210,7 +3211,7 @@ static uint8_t migrate_v03(void)
 
     screen_clear();
     put_str(2, 4, "SAVE UPGRADED");
-    put_str(1, 6, "V0.3.7.3 READY");
+    put_str(1, 6, "V0.3.7.4 READY");
     delay(1800);
     recovery_offer();
     return 1;
@@ -3231,7 +3232,7 @@ static uint8_t migrate_v04(void)
 
     screen_clear();
     put_str(2, 4, "SAVE UPGRADED");
-    put_str(1, 6, "V0.3.7.3 READY");
+    put_str(1, 6, "V0.3.7.4 READY");
     delay(1200);
     return 1;
 }
@@ -3453,7 +3454,7 @@ void main(void)
     put_tile(9, 2, 254);
     put_str(4, 3, "GB PASSWORD");
     put_str(7, 5, "VAULT");
-    put_str(6, 8, "V0.3.7.3");
+    put_str(6, 8, "V0.3.7.4");
     put_str(4, 11, "PRESS START");
     put_str(1, 16, "BATTERY CART NEEDED");
     getkey(J_START);
